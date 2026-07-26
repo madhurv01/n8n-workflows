@@ -1,0 +1,287 @@
+{
+  "name": "Apointments",
+  "nodes": [
+    {
+      "parameters": {
+        "batchSize": 10,
+        "options": {
+          "reset": false
+        }
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        -432,
+        -272
+      ],
+      "id": "db6e9d6a-20e0-4737-8cc5-fe7ec94a701b",
+      "name": "Loop Over Items",
+      "alwaysOutputData": true,
+      "retryOnFail": true,
+      "maxTries": 5
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const row = $input.item.json;\n\n// --- Build a normalized lookup so header spacing/casing mismatches can't break it ---\nfunction getField(row, targetKey) {\n  const normalizedTarget = targetKey.replace(/\\s+/g, '').toLowerCase();\n  for (const key in row) {\n    if (key.replace(/\\s+/g, '').toLowerCase() === normalizedTarget) {\n      return row[key];\n    }\n  }\n  return '';\n}\n\nconst errors = [];\n\n// --- Name ---\nconst name = getField(row, 'YOUR FULL NAME').toString().trim();\n\nif (!name) {\n  errors.push('Missing name');\n} else if (/\\d/.test(name)) {\n  errors.push('Invalid name: must not contain numbers');\n} else if (!/^[A-Za-z\\s.'-]+$/.test(name)) {\n  errors.push('Invalid name: contains disallowed characters');\n}\n\n// --- Personnel number ---\nconst rawPhone = getField(row, 'PERSONNEL NUMBER').toString().trim();\nlet phone = rawPhone.replace(/\\D/g, '');\n\nif (phone.length === 12 && phone.startsWith('91')) {\n  phone = phone.slice(2);\n} else if (phone.length === 11 && phone.startsWith('0')) {\n  phone = phone.slice(1);\n}\n\nif (phone.length !== 10 || !/^[6789]/.test(phone)) {\n  errors.push('Invalid Indian mobile number: must be 10 digits starting with 6, 7, 8, or 9');\n}\n\n// --- Other fields ---\nconst gender = getField(row, 'YOUR GENDER');\nconst doctor = getField(row, 'APPOINTMENT WITH DOCTOR');\nconst dayStr = getField(row, 'APPOINTMENT DAY');\nconst timeStr = getField(row, 'APPOINTMENT TIME').toString().trim();\n\nif (!gender) errors.push('Missing gender');\nif (!doctor) errors.push('Missing doctor');\n\n// --- Date validation ---\nconst [d, m, y] = (dayStr || '').split('/').map(Number);\nconst apptDate = new Date(y, (m - 1), d);\nconst today = new Date();\ntoday.setHours(0, 0, 0, 0);\n\nif (!d || !m || !y || isNaN(apptDate.getTime()) || apptDate < today) {\n  errors.push('Invalid or past appointment date');\n}\n\n// --- Time validation ---\nif (!/^([01]\\d|2[0-3]):([0-5]\\d):([0-5]\\d)$/.test(timeStr)) {\n  errors.push('Invalid appointment time format');\n}\n\n// --- Simple hash for dedup ---\nfunction simpleHash(str) {\n  let hash = 0;\n  for (let i = 0; i < str.length; i++) {\n    hash = ((hash << 5) - hash) + str.charCodeAt(i);\n    hash |= 0;\n  }\n  return Math.abs(hash).toString(16);\n}\n\nconst rowHash = simpleHash(name + phone + dayStr + timeStr);\n\nconst isoDate = !isNaN(apptDate.getTime())\n  ? `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`\n  : null;\n\nreturn {\n  json: {\n    full_name: name,\n    gender: gender,\n    personnel_number: phone,\n    doctor: doctor,\n    appointment_day: isoDate,\n    appointment_time: timeStr,\n    row_hash: rowHash,\n    is_valid: errors.length === 0,\n    errors: errors.join('; ')\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -64,
+        -352
+      ],
+      "id": "53888886-7000-4433-8856-482132fdc205",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "bf5ef551-decd-4f7f-a08a-6cac591331ec",
+              "leftValue": "={{ $json.is_valid }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        144,
+        -224
+      ],
+      "id": "04c18e8f-1b5a-4a37-8d61-e7c150d71460",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "tableId": "appointments",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "full_name",
+              "fieldValue": "={{ $json.full_name }}"
+            },
+            {
+              "fieldId": "gender",
+              "fieldValue": "={{ $json.gender }}"
+            },
+            {
+              "fieldId": "personnel_number",
+              "fieldValue": "={{ $json.personnel_number }}"
+            },
+            {
+              "fieldId": "doctor",
+              "fieldValue": "={{ $json.doctor }}"
+            },
+            {
+              "fieldId": "appointment_day",
+              "fieldValue": "={{ $json.appointment_day }}"
+            },
+            {
+              "fieldId": "appointment_time",
+              "fieldValue": "={{ $json.appointment_time }}"
+            },
+            {
+              "fieldId": "sheet_row_hash",
+              "fieldValue": "={{ $json.row_hash }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        -80,
+        80
+      ],
+      "id": "33c4b626-9956-4ff5-b08a-dabc88bf3f3f",
+      "name": "Create a row",
+      "credentials": {
+        "supabaseApi": {
+          "id": "O2ElgrZmf5lQlGsX",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "documentId": {
+          "__rl": true,
+          "value": "1gwEsHTc0qadKwns92Lae-6jKiTqFPJCiPVBxDwfRLd4",
+          "mode": "list",
+          "cachedResultName": "Hello .!  Book Your Appointment Fastly Now ...... (Responses)",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1gwEsHTc0qadKwns92Lae-6jKiTqFPJCiPVBxDwfRLd4/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1657356744,
+          "mode": "list",
+          "cachedResultName": "Form responses 1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1gwEsHTc0qadKwns92Lae-6jKiTqFPJCiPVBxDwfRLd4/edit#gid=1657356744"
+        },
+        "event": "rowAdded",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheetsTrigger",
+      "typeVersion": 1,
+      "position": [
+        -880,
+        -176
+      ],
+      "id": "4d04f5d6-2665-4462-b24f-0150978886e2",
+      "name": "Google Sheets Trigger",
+      "credentials": {
+        "googleSheetsTriggerOAuth2Api": {
+          "id": "R2lWz3HA9B66aw0D",
+          "name": "Google Sheets Trigger account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "tableId": "failed_submissions",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "errors",
+              "fieldValue": "={{ $json.errors }}"
+            },
+            {
+              "fieldId": "raw_data",
+              "fieldValue": "={{ JSON.stringify($json) }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        384,
+        -208
+      ],
+      "id": "61815d29-7e26-4988-bc01-c46d79967155",
+      "name": "Create a row1",
+      "credentials": {
+        "supabaseApi": {
+          "id": "O2ElgrZmf5lQlGsX",
+          "name": "Supabase account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Loop Over Items": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Create a row",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Create a row1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create a row": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Sheets Trigger": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create a row1": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": true
+  },
+  "versionId": "f5751c78-9def-424b-a1e8-a4dfafa864de",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "eb45b6b18330b7ec833771190e284bc418d335498c02ead5eefbbee7aca2323c"
+  },
+  "nodeGroups": [],
+  "id": "V7qzzWbrvmfDzNyR",
+  "tags": []
+}
