@@ -1,3 +1,9 @@
+<img
+    src="TelegramSpeechToTextAgent.png"
+    alt="Build Your Own Agent Now - n8n AI Agents"
+    width="100%"
+  />
+
 # Speech-To-Text — Telegram Voice Transcription (n8n Workflow)
 
 An n8n automation that listens for voice notes sent to a Telegram bot, transcribes them using Groq's Whisper API, and replies back with the text — running on a self-hosted, local n8n instance tunneled through ngrok.
