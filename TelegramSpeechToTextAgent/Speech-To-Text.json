@@ -1,0 +1,266 @@
+{
+  "name": "Speech-To-Text",
+  "nodes": [
+    {
+      "parameters": {
+        "updates": [
+          "message"
+        ],
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -704,
+        -128
+      ],
+      "id": "d9466bba-70b7-41dc-9baf-45758e6460a9",
+      "name": "Telegram Trigger",
+      "webhookId": "40a4eacd-31f8-4dd7-bd71-1c0bd9e8d6b3",
+      "credentials": {
+        "telegramApi": {
+          "id": "Ccmf7vTgBAWNTeqM",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "d34f27df-9e2d-4ad5-91cd-6a3a86c5b734",
+              "leftValue": "={{ $json.message.voice }}",
+              "rightValue": "",
+              "operator": {
+                "type": "object",
+                "operation": "exists",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -656,
+        80
+      ],
+      "id": "8a6914d9-ba98-450e-8f89-ac88e33c1c10",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "resource": "file",
+        "fileId": "={{ $json.message.voice.file_id }}",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        -416,
+        64
+      ],
+      "id": "31705f07-52f0-4c30-8135-3cee1384aeaf",
+      "name": "Get a file",
+      "webhookId": "458628cc-5149-4c64-89d0-6e80d35de81c",
+      "credentials": {
+        "telegramApi": {
+          "id": "Ccmf7vTgBAWNTeqM",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.groq.com/openai/v1/audio/transcriptions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "parameterType": "formBinaryData",
+              "name": "file",
+              "inputDataFieldName": "data"
+            },
+            {
+              "name": "model",
+              "value": "whisper-large-v3-turbo"
+            },
+            {
+              "name": "response_format",
+              "value": "json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -64,
+        32
+      ],
+      "id": "f45a77c8-30cc-40ba-a612-201f4ceb718e",
+      "name": "HTTP Request",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "2B1OUglvuWwUQmME",
+          "name": "Header Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first();\n\nreturn [{\n  json: item.json,\n  binary: {\n    data: {\n      ...item.binary.data,\n      fileName: 'audio.ogg',\n      fileExtension: 'ogg',\n      mimeType: 'audio/ogg'\n    }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -256,
+        -112
+      ],
+      "id": "bcd3b52d-8e7d-4a05-b51e-d9794a35a40f",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "4c93ddc4-29f7-4969-abd3-aeead8ac30af",
+              "name": "transcript =",
+              "value": "={{ $json.text }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        144,
+        -128
+      ],
+      "id": "1c63081f-fa6d-4c6d-a994-f7222e1534e8",
+      "name": "Edit Fields"
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Telegram Trigger').item.json.message.chat.id }}",
+        "text": "={{ $json['transcript ='] }}",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        336,
+        16
+      ],
+      "id": "99933d3d-200e-4bf9-8acf-6811ed81487c",
+      "name": "Send a text message",
+      "webhookId": "b37289b9-053f-49fa-876b-07e7f3878b7d",
+      "credentials": {
+        "telegramApi": {
+          "id": "Ccmf7vTgBAWNTeqM",
+          "name": "Telegram account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Telegram Trigger": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Get a file",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get a file": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "node": "Send a text message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "d8238fdb-d5a1-4ab8-8aa8-13280f4b7051",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "eb45b6b18330b7ec833771190e284bc418d335498c02ead5eefbbee7aca2323c"
+  },
+  "nodeGroups": [],
+  "id": "1DFOi9YwHl1NUVOf",
+  "tags": []
+}
