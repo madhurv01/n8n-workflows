@@ -1,0 +1,79 @@
+{
+  "name": "IT Support - Error Handler",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "error-trigger",
+      "name": "Error Trigger",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Same config approach as the main workflow — n8n Cloud's free plan has no\n// Environments feature, so values are hardcoded here instead of read via $env.\n// Keep these in sync with the Config node in the main workflow.\nreturn [{\n  json: {\n    SUPABASE_URL: 'https://YOUR-PROJECT.supabase.co',\n    SUPABASE_SERVICE_ROLE_KEY: 'YOUR_SERVICE_ROLE_KEY',\n    TELEGRAM_SUPPORT_GROUP_CHAT_ID: 'YOUR_TELEGRAM_CHAT_ID'\n  }\n}];"
+      },
+      "id": "config",
+      "name": "Config",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [220, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "const exec = $('Error Trigger').first().json;\nconst failedNode = exec.execution?.lastNodeExecuted || exec.workflow?.lastNodeExecuted || 'unknown';\nconst errorMessage = exec.execution?.error?.message || exec.trigger?.error?.message || 'Unknown error';\nreturn [{\n  json: {\n    step: failedNode,\n    status: 'error',\n    detail: { message: errorMessage, workflow: exec.workflow?.name || 'IT Support - Ticket Triage & Notification' }\n  }\n}];"
+      },
+      "id": "extract-error",
+      "name": "Extract Error Details",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [440, 0]
+    },
+    {
+      "parameters": {
+        "url": "={{$('Config').first().json.SUPABASE_URL}}/rest/v1/workflow_logs",
+        "method": "POST",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey", "value": "={{$('Config').first().json.SUPABASE_SERVICE_ROLE_KEY}}" },
+            { "name": "Authorization", "value": "=Bearer {{$('Config').first().json.SUPABASE_SERVICE_ROLE_KEY}}" },
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "Prefer", "value": "return=minimal" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"step\": $json.step, \"status\": $json.status, \"detail\": $json.detail } }}",
+        "options": {}
+      },
+      "id": "log-error",
+      "name": "Log Error to Supabase",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [660, 0],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "chatId": "={{$('Config').first().json.TELEGRAM_SUPPORT_GROUP_CHAT_ID}}",
+        "text": "=⚠️ *IT Support workflow failed*\n*Step:* {{$json.step}}\n*Error:* {{$json.detail.message}}\n\nCheck the n8n execution log for details.",
+        "additionalFields": { "parse_mode": "Markdown" }
+      },
+      "id": "notify-telegram",
+      "name": "Notify Ops via Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [880, 0],
+      "credentials": { "telegramApi": { "id": "REPLACE_ME", "name": "Telegram bot" } },
+      "continueOnFail": true
+    }
+  ],
+  "connections": {
+    "Error Trigger": { "main": [[{ "node": "Config", "type": "main", "index": 0 }]] },
+    "Config": { "main": [[{ "node": "Extract Error Details", "type": "main", "index": 0 }]] },
+    "Extract Error Details": { "main": [[{ "node": "Log Error to Supabase", "type": "main", "index": 0 }]] },
+    "Log Error to Supabase": { "main": [[{ "node": "Notify Ops via Telegram", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" }
+}

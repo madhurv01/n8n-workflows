@@ -1,0 +1,14 @@
+# Frontend
+ITQueryResolverAgent/it-support-system/node_modules/
+ITQueryResolverAgent/it-support-system/.next/
+ITQueryResolverAgent/it-support-system/.env.local
+ITQueryResolverAgent/it-support-system/.env*.local
+ITQueryResolverAgent/it-support-system/npm-debug.log*
+ITQueryResolverAgent/it-support-system/tsconfig.tsbuildinfo
+
+# OS / editor
+.DS_Store
+Thumbs.db
+
+# Preview/scratch artifacts
+docs/_preview*.png

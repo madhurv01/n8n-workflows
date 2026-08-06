@@ -1,0 +1,348 @@
+{
+  "name": "IT Support - Ticket Triage & Notification",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ticket-created",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook: Ticket Created",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [-1420, 0],
+      "webhookId": "ticket-created"
+    },
+    {
+      "parameters": {
+        "jsCode": "// n8n Cloud's free plan doesn't include the Environments feature, so all\n// config lives here instead of $env.* — fill these in before activating the\n// workflow. Never commit real secrets to source control; this file is meant\n// to be edited locally after import, not checked in with real values.\nreturn [{\n  json: {\n    ...$json,\n    SUPABASE_URL: 'https://YOUR-PROJECT.supabase.co',\n    SUPABASE_SERVICE_ROLE_KEY: 'YOUR_SERVICE_ROLE_KEY',\n    SUPABASE_STORAGE_BUCKET: 'ticket-attachments',\n\n    GEMINI_API_KEY: 'YOUR_GEMINI_API_KEY',\n\n    JIRA_PROJECT_ID: 'YOUR_JIRA_PROJECT_ID',\n    JIRA_ISSUETYPE_BUG_ID: 'YOUR_BUG_ISSUETYPE_ID',\n    JIRA_ISSUETYPE_TASK_ID: 'YOUR_TASK_ISSUETYPE_ID',\n\n    TELEGRAM_SUPPORT_GROUP_CHAT_ID: 'YOUR_TELEGRAM_CHAT_ID',\n\n    TEAM_EMAIL_SERVICE_DESK: 'servicedesk@company.com',\n    TEAM_EMAIL_NETWORK: 'network@company.com',\n    TEAM_EMAIL_SECURITY: 'security@company.com',\n    TEAM_EMAIL_INFRASTRUCTURE: 'infra@company.com',\n    TEAM_EMAIL_APP_SUPPORT: 'appsupport@company.com'\n  }\n}];"
+      },
+      "id": "config",
+      "name": "Config",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-1200, 0],
+      "notesInFlow": true,
+      "notes": "Edit the values in this node with your real Supabase/Gemini/Jira/Telegram config — used instead of n8n Environments (paid feature on n8n Cloud)."
+    },
+    {
+      "parameters": {
+        "url": "={{$('Config').first().json.SUPABASE_URL}}/rest/v1/tickets",
+        "method": "GET",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "id", "value": "=eq.{{$json.body.record.id}}" },
+            { "name": "select", "value": "*" }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey", "value": "={{$('Config').first().json.SUPABASE_SERVICE_ROLE_KEY}}" },
+            { "name": "Authorization", "value": "=Bearer {{$('Config').first().json.SUPABASE_SERVICE_ROLE_KEY}}" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "fetch-full-ticket",
+      "name": "Fetch Full Ticket",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-980, 0],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "jsCode": "// Supabase REST returns an array — normalize, call Gemini, parse its response,\n// and apply the Jira business rules, all in one step.\nconst cfg = $('Config').first().json;\nconst raw = $input.first().json;\nconst ticket = Array.isArray(raw) ? raw[0] : raw;\n\nconst prompt = `You are an IT service-desk triage assistant. Analyze this ticket and return ONLY a compact JSON object (no markdown fences, no commentary) with keys: classification (short label), severity (one of Low, Medium, High, Critical based on business impact, may differ from the requester's chosen priority if the description suggests otherwise), summary (2-3 sentences, professional tone, suitable for a stakeholder-facing report), recommended_team (one of: Service Desk, Network Engineering, Security Operations, Infrastructure, Application Support), jira_recommended (true/false — true if this looks like a Security incident, an Infrastructure outage, or otherwise warrants formal issue tracking).\n\nTicket:\nSubject: ${ticket.subject}\nDescription: ${ticket.description}\nCategory: ${ticket.category}\nRequester priority: ${ticket.priority}\nDepartment: ${ticket.department}`;\n\nlet parsed = {};\ntry {\n  const aiResp = await this.helpers.httpRequest({\n    method: 'POST',\n    url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${cfg.GEMINI_API_KEY}`,\n    headers: { 'Content-Type': 'application/json' },\n    body: {\n      contents: [{ parts: [{ text: prompt }] }],\n      generationConfig: { temperature: 0.2, responseMimeType: 'application/json' }\n    },\n    json: true\n  });\n  const text = aiResp.candidates?.[0]?.content?.parts?.[0]?.text || '{}';\n  parsed = JSON.parse(text);\n} catch (e) {\n  parsed = {\n    classification: ticket.category,\n    severity: ticket.priority,\n    summary: 'AI summary unavailable — manual review recommended.',\n    recommended_team: 'Service Desk',\n    jira_recommended: ['High', 'Critical'].includes(ticket.priority)\n  };\n}\n\n// Business rules — edit these to change when Jira issues get created.\nconst HIGH_PRIORITIES = ['High', 'Critical'];\nconst FORCE_JIRA_CATEGORIES = ['Security', 'Infrastructure'];\nconst ai_severity = parsed.severity || ticket.priority;\nconst jira_required = HIGH_PRIORITIES.includes(ticket.priority) ||\n  HIGH_PRIORITIES.includes(ai_severity) ||\n  FORCE_JIRA_CATEGORIES.includes(ticket.category) ||\n  !!parsed.jira_recommended;\n\nreturn [{\n  json: {\n    ...ticket,\n    ai_classification: parsed.classification || ticket.category,\n    ai_severity,\n    ai_summary: parsed.summary || '',\n    ai_recommended_team: parsed.recommended_team || 'Service Desk',\n    jira_required\n  }\n}];"
+      },
+      "id": "ai-analysis-rules",
+      "name": "AI Analysis & Business Rules",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-760, 0]
+    },
+    {
+      "parameters": {
+        "url": "={{$('Config').first().json.SUPABASE_URL}}/rest/v1/tickets",
+        "method": "PATCH",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [{ "name": "id", "value": "=eq.{{$json.id}}" }]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey", "value": "={{$('Config').first().json.SUPABASE_SERVICE_ROLE_KEY}}" },
+            { "name": "Authorization", "value": "=Bearer {{$('Config').first().json.SUPABASE_SERVICE_ROLE_KEY}}" },
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "Prefer", "value": "return=representation" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"ai_summary\": $json.ai_summary, \"ai_severity\": $json.ai_severity, \"ai_classification\": $json.ai_classification, \"ai_recommended_team\": $json.ai_recommended_team, \"jira_required\": $json.jira_required, \"status\": \"In Progress\" } }}",
+        "options": {}
+      },
+      "id": "update-ai-fields",
+      "name": "Update Ticket: AI Fields",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-540, 0],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1500
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose" },
+          "conditions": [
+            {
+              "id": "cond-jira",
+              "leftValue": "={{$json.jira_required}}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "true" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-jira-required",
+      "name": "IF: Jira Required?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [-320, 0]
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "project": { "mode": "id", "value": "={{$('Config').first().json.JIRA_PROJECT_ID}}" },
+        "issueType": { "mode": "id", "value": "={{ $json.ai_severity === 'Critical' ? $('Config').first().json.JIRA_ISSUETYPE_BUG_ID : $('Config').first().json.JIRA_ISSUETYPE_TASK_ID }}" },
+        "summary": "=[{{$json.ticket_code}}] {{$json.subject}}",
+        "additionalFields": {
+          "description": "=Ticket: {{$json.ticket_code}}\nRequester: {{$json.name}} ({{$json.email}})\nDepartment: {{$json.department}}\nCategory: {{$json.category}}\nSeverity (AI): {{$json.ai_severity}}\nRecommended team: {{$json.ai_recommended_team}}\n\nSummary:\n{{$json.ai_summary}}\n\nOriginal description:\n{{$json.description}}",
+          "labels": "=[\"{{$json.category}}\", \"auto-triaged\"]",
+          "priority": { "mode": "name", "value": "={{$json.ai_severity}}" }
+        }
+      },
+      "id": "create-jira-issue",
+      "name": "Create Jira Issue",
+      "type": "n8n-nodes-base.jira",
+      "typeVersion": 1,
+      "position": [-100, -120],
+      "credentials": { "jiraSoftwareCloudApi": { "id": "REPLACE_ME", "name": "Jira Cloud account" } },
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "url": "={{$('Config').first().json.SUPABASE_URL}}/rest/v1/tickets",
+        "method": "PATCH",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [{ "name": "id", "value": "=eq.{{$('AI Analysis & Business Rules').item.json.id}}" }]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey", "value": "={{$('Config').first().json.SUPABASE_SERVICE_ROLE_KEY}}" },
+            { "name": "Authorization", "value": "=Bearer {{$('Config').first().json.SUPABASE_SERVICE_ROLE_KEY}}" },
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "Prefer", "value": "return=representation" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"jira_issue_key\": $json.key } }}",
+        "options": {}
+      },
+      "id": "save-jira-key",
+      "name": "Save Jira Key to Supabase",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [120, -120],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1500
+    },
+    {
+      "parameters": {},
+      "id": "no-jira-noop",
+      "name": "No Jira Needed",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [-100, 140]
+    },
+    {
+      "parameters": {
+        "mode": "chooseBranch",
+        "output": "input1"
+      },
+      "id": "merge-jira-branch",
+      "name": "Merge Branches",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [340, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Builds a plain-text incident report and uploads it directly to Supabase\n// Storage — no PDF renderer / Docker service required. Also resolves the\n// destination team mailbox for the notification step.\nconst cfg = $('Config').first().json;\nconst t = $input.first().json;\nconst jiraKey = t.jira_issue_key || null;\n\nconst TEAM_EMAILS = {\n  'Service Desk': cfg.TEAM_EMAIL_SERVICE_DESK,\n  'Network Engineering': cfg.TEAM_EMAIL_NETWORK,\n  'Security Operations': cfg.TEAM_EMAIL_SECURITY,\n  'Infrastructure': cfg.TEAM_EMAIL_INFRASTRUCTURE,\n  'Application Support': cfg.TEAM_EMAIL_APP_SUPPORT\n};\nconst teamEmail = TEAM_EMAILS[t.ai_recommended_team] || cfg.TEAM_EMAIL_SERVICE_DESK;\n\nconst report = `IT SUPPORT INCIDENT REPORT\n===========================\nTicket:        ${t.ticket_code}\nRequester:     ${t.name} <${t.email}>\nDepartment:    ${t.department}\nCategory:      ${t.category}\nPriority:      ${t.priority}  (AI severity: ${t.ai_severity})\nRecommended:   ${t.ai_recommended_team}\nJira:          ${jiraKey || 'Not raised'}\nStatus:        In Progress\n\nSubject\n-------\n${t.subject}\n\nAI Summary\n----------\n${t.ai_summary || 'Not available'}\n\nOriginal Description\n---------------------\n${t.description}\n\nGenerated automatically by the IT Support System - ${new Date().toISOString()}\n`;\n\nconst buffer = Buffer.from(report, 'utf-8');\nconst fileName = `${t.ticket_code}.txt`;\n\nawait this.helpers.httpRequest({\n  method: 'POST',\n  url: `${cfg.SUPABASE_URL}/storage/v1/object/${cfg.SUPABASE_STORAGE_BUCKET}/reports/${fileName}`,\n  headers: {\n    apikey: cfg.SUPABASE_SERVICE_ROLE_KEY,\n    Authorization: `Bearer ${cfg.SUPABASE_SERVICE_ROLE_KEY}`,\n    'Content-Type': 'text/plain',\n    'x-upsert': 'true'\n  },\n  body: buffer\n});\n\nconst reportUrl = `${cfg.SUPABASE_URL}/storage/v1/object/public/${cfg.SUPABASE_STORAGE_BUCKET}/reports/${fileName}`;\n\nreturn [{\n  json: { ...t, jira_issue_key: jiraKey, report_url: reportUrl, team_email: teamEmail },\n  binary: { data: await this.helpers.prepareBinaryData(buffer, fileName, 'text/plain') }\n}];"
+      },
+      "id": "build-upload-report",
+      "name": "Build & Upload Report (.txt)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [560, 0]
+    },
+    {
+      "parameters": {
+        "url": "={{$('Config').first().json.SUPABASE_URL}}/rest/v1/tickets",
+        "method": "PATCH",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [{ "name": "id", "value": "=eq.{{$json.id}}" }]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey", "value": "={{$('Config').first().json.SUPABASE_SERVICE_ROLE_KEY}}" },
+            { "name": "Authorization", "value": "=Bearer {{$('Config').first().json.SUPABASE_SERVICE_ROLE_KEY}}" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"report_url\": $json.report_url, \"status\": \"In Progress\" } }}",
+        "options": {}
+      },
+      "id": "update-report-url",
+      "name": "Update Ticket: Report URL",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [780, 0],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1500
+    },
+    {
+      "parameters": {
+        "sendTo": "={{$json.email}}",
+        "subject": "=Your IT ticket {{$json.ticket_code}} has been triaged",
+        "message": "=Hi {{$json.name}},<br><br>Your ticket <b>{{$json.ticket_code}}</b> — \"{{$json.subject}}\" — has been reviewed.<br><br><b>AI summary:</b> {{$json.ai_summary}}<br><b>Severity:</b> {{$json.ai_severity}}<br><b>Assigned team:</b> {{$json.ai_recommended_team}}<br>{{$json.jira_issue_key ? '<b>Jira reference:</b> ' + $json.jira_issue_key + '<br>' : ''}}<br>A plain-text incident report is attached. You can track progress any time from the ticket history page.<br><br>— IT Support Desk",
+        "options": {
+          "attachmentsUi": {
+            "attachmentsBinary": [{ "property": "data" }]
+          }
+        }
+      },
+      "id": "email-requester",
+      "name": "Send Email to Requester",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1000, -100],
+      "credentials": { "gmailOAuth2": { "id": "REPLACE_ME", "name": "Gmail account" } },
+      "continueOnFail": true,
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "sendTo": "={{$json.team_email}}",
+        "subject": "=[{{$json.ai_severity}}] New ticket assigned: {{$json.ticket_code}}",
+        "message": "=New ticket routed to your team.<br><br><b>Ticket:</b> {{$json.ticket_code}}<br><b>Requester:</b> {{$json.name}} ({{$json.email}}), {{$json.department}}<br><b>Category:</b> {{$json.category}}<br><b>Severity:</b> {{$json.ai_severity}}<br>{{$json.jira_issue_key ? '<b>Jira:</b> ' + $json.jira_issue_key + '<br>' : ''}}<br><b>AI Summary:</b> {{$json.ai_summary}}<br><br>Full report attached.",
+        "options": {
+          "attachmentsUi": {
+            "attachmentsBinary": [{ "property": "data" }]
+          }
+        }
+      },
+      "id": "email-team",
+      "name": "Send Email to Support Team",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1000, 100],
+      "credentials": { "gmailOAuth2": { "id": "REPLACE_ME", "name": "Gmail account" } },
+      "continueOnFail": true,
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "chatId": "={{$('Config').first().json.TELEGRAM_SUPPORT_GROUP_CHAT_ID}}",
+        "text": "=🎫 *New Ticket:* {{$json.ticket_code}}\n*Priority:* {{$json.priority}} (AI severity: {{$json.ai_severity}})\n*Category:* {{$json.category}}\n*Team:* {{$json.ai_recommended_team}}\n{{$json.jira_issue_key ? '*Jira:* ' + $json.jira_issue_key + '\\n' : ''}}\n*Summary:* {{$json.ai_summary}}",
+        "additionalFields": { "parse_mode": "Markdown" }
+      },
+      "id": "telegram-summary",
+      "name": "Send Telegram Summary",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1220, 0],
+      "credentials": { "telegramApi": { "id": "REPLACE_ME", "name": "Telegram bot" } },
+      "continueOnFail": true,
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "operation": "sendDocument",
+        "chatId": "={{$('Config').first().json.TELEGRAM_SUPPORT_GROUP_CHAT_ID}}",
+        "binaryData": true,
+        "binaryPropertyName": "data",
+        "additionalFields": { "caption": "=Incident report — {{$json.ticket_code}}" }
+      },
+      "id": "telegram-report",
+      "name": "Send Telegram Report",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1440, 0],
+      "credentials": { "telegramApi": { "id": "REPLACE_ME", "name": "Telegram bot" } },
+      "continueOnFail": true,
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 2000
+    }
+  ],
+  "connections": {
+    "Webhook: Ticket Created": { "main": [[{ "node": "Config", "type": "main", "index": 0 }]] },
+    "Config": { "main": [[{ "node": "Fetch Full Ticket", "type": "main", "index": 0 }]] },
+    "Fetch Full Ticket": { "main": [[{ "node": "AI Analysis & Business Rules", "type": "main", "index": 0 }]] },
+    "AI Analysis & Business Rules": { "main": [[{ "node": "Update Ticket: AI Fields", "type": "main", "index": 0 }]] },
+    "Update Ticket: AI Fields": { "main": [[{ "node": "IF: Jira Required?", "type": "main", "index": 0 }]] },
+    "IF: Jira Required?": {
+      "main": [
+        [{ "node": "Create Jira Issue", "type": "main", "index": 0 }],
+        [{ "node": "No Jira Needed", "type": "main", "index": 0 }]
+      ]
+    },
+    "Create Jira Issue": { "main": [[{ "node": "Save Jira Key to Supabase", "type": "main", "index": 0 }]] },
+    "Save Jira Key to Supabase": { "main": [[{ "node": "Merge Branches", "type": "main", "index": 0 }]] },
+    "No Jira Needed": { "main": [[{ "node": "Merge Branches", "type": "main", "index": 1 }]] },
+    "Merge Branches": { "main": [[{ "node": "Build & Upload Report (.txt)", "type": "main", "index": 0 }]] },
+    "Build & Upload Report (.txt)": { "main": [[{ "node": "Update Ticket: Report URL", "type": "main", "index": 0 }]] },
+    "Update Ticket: Report URL": {
+      "main": [
+        [
+          { "node": "Send Email to Requester", "type": "main", "index": 0 },
+          { "node": "Send Email to Support Team", "type": "main", "index": 0 },
+          { "node": "Send Telegram Summary", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Send Telegram Summary": { "main": [[{ "node": "Send Telegram Report", "type": "main", "index": 0 }]] }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "errorWorkflow": "REPLACE_WITH_ERROR_WORKFLOW_ID"
+  }
+}

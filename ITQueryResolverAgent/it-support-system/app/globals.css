@@ -1,0 +1,43 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  text-shadow: 0 1px 2px rgba(255, 255, 255, 0.5), 0 0 10px rgba(255, 255, 255, 0.3);
+}
+
+@layer components {
+  .glass-panel {
+    @apply bg-white/[0.10] backdrop-blur-2xl border border-white/15 shadow-glass rounded-2xl;
+  }
+
+  .glass-input {
+    @apply w-full rounded-xl bg-white/[0.03] border border-white/10 px-4 py-2.5
+      text-sm text-slate-100 placeholder:text-slate-500
+      focus:outline-none focus:ring-2 focus:ring-accent-500/50 focus:border-accent-500/40
+      transition;
+  }
+
+  .glass-label {
+    @apply mb-1.5 block text-xs font-medium tracking-wide text-slate-400 uppercase;
+  }
+
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl
+      bg-gradient-to-r from-accent-500 to-accent-600
+      px-5 py-2.5 text-sm font-semibold text-base-950
+      shadow-[0_0_24px_-4px_rgba(34,211,238,0.55)]
+      hover:brightness-110 active:brightness-95
+      disabled:opacity-50 disabled:cursor-not-allowed transition;
+  }
+
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl
+      border border-white/10 bg-white/[0.03] px-4 py-2 text-sm font-medium
+      text-slate-300 hover:bg-white/[0.07] hover:text-white transition;
+  }
+
+  .status-pill {
+    @apply inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium;
+  }
+}
