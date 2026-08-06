@@ -1,0 +1,311 @@
+{
+  "name": "Web Scapper",
+  "nodes": [
+    {
+      "parameters": {
+        "formTitle": "Web Scrapper",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "URL"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.5,
+      "position": [
+        -848,
+        -224
+      ],
+      "id": "4a667cab-bbe6-4c3b-964b-3f560c276cd9",
+      "name": "On form submission",
+      "webhookId": "bd2da7f2-5f71-42aa-aa71-d6bb5e61d8a4"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\nconst url = items[0].json.URL;\n\nconsole.log(url);\n\nreturn [\n  {\n    json: {\n      url\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -816,
+        112
+      ],
+      "id": "a1716742-3a54-4e8b-9bdf-d875c88a1185",
+      "name": "Code in JavaScript",
+      "alwaysOutputData": true,
+      "retryOnFail": false
+    },
+    {
+      "parameters": {
+        "url": "={{$json.url}}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -528,
+        112
+      ],
+      "id": "d405bcb1-08bf-4479-b3cc-0685f79e033c",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "operation": "extractHtmlContent",
+        "extractionValues": {
+          "values": [
+            {
+              "key": "links",
+              "cssSelector": "a",
+              "returnValue": "attribute",
+              "attribute": "href",
+              "returnArray": true
+            },
+            {
+              "key": "images",
+              "cssSelector": "img",
+              "returnValue": "attribute",
+              "attribute": "src",
+              "returnArray": true
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.html",
+      "typeVersion": 1.2,
+      "position": [
+        -304,
+        -192
+      ],
+      "id": "573ca579-7694-4962-80de-50108700254d",
+      "name": "HTML"
+    },
+    {
+      "parameters": {
+        "jsCode": "const baseUrl = \"https://www.pinterest.com\";\n\nconst links = ($json.links || []).map(link => {\n  if (!link) return null;\n\n  if (link.startsWith(\"http\")) {\n    return link;\n  }\n\n  if (link.startsWith(\"/\")) {\n    return baseUrl + link;\n  }\n\n  return baseUrl + \"/\" + link;\n}).filter(Boolean);\n\nconst images = [...new Set($json.images || [])];\n\nreturn [{\n  json: {\n    links: [...new Set(links)],\n    images\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -32,
+        -192
+      ],
+      "id": "d412f1d3-18e0-44d7-b4b5-dc4d575249fb",
+      "name": "Code in JavaScript1"
+    },
+    {
+      "parameters": {
+        "jsCode": "const links = $json.links || [];\nconst images = $json.images || [];\n\nreturn [\n  ...links.map(link => ({ json: { type: \"link\", value: link } })),\n  ...images.map(image => ({ json: { type: \"image\", value: image } }))\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        -192
+      ],
+      "id": "e0f9f7e4-1cba-4810-aa65-7fd79aabb12e",
+      "name": "Code in JavaScript2"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\nreturn items.map(item => ({\n  json: {\n    link: `=HYPERLINK(\"${item.json.link}\", \"${item.json.link}\")`,\n    image: `=IMAGE(\"${item.json.image}\")`\n  }\n}));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        48,
+        128
+      ],
+      "id": "8e4139fc-8fb5-4598-b403-1a44a8d1b007",
+      "name": "Code in JavaScript3"
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "1mV3w3jOLP88bPR6eSxil5kk_pk9VMwHA_jDjif-iifs",
+          "mode": "list",
+          "cachedResultName": "WEB  SCRAPPER",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1mV3w3jOLP88bPR6eSxil5kk_pk9VMwHA_jDjif-iifs/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Scrapped Data",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1mV3w3jOLP88bPR6eSxil5kk_pk9VMwHA_jDjif-iifs/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Links": "={{ $json.link }}",
+            "Images": "={{ $json.image }}"
+          },
+          "matchingColumns": [
+            "Links"
+          ],
+          "schema": [
+            {
+              "id": "Links",
+              "displayName": "Links",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Images",
+              "displayName": "Images",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        304,
+        128
+      ],
+      "id": "25ebe774-f3a7-4d21-8f0c-a7693ed3be22",
+      "name": "Append or update row in sheet",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "eIyxelg5PgUgOuCO",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\nconst links = items.filter(i => i.json.type === \"link\").map(i => i.json.value);\nconst images = items.filter(i => i.json.type === \"image\").map(i => i.json.value);\n\nconst maxLen = Math.max(links.length, images.length);\nconst rows = [];\n\nfor (let i = 0; i < maxLen; i++) {\n  rows.push({\n    json: {\n      link: links[i] || \"\",\n      image: images[i] || \"\"\n    }\n  });\n}\n\nreturn rows;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -208,
+        128
+      ],
+      "id": "f273418c-85d1-4fac-b64e-d99bf2b9db6c",
+      "name": "Code in JavaScript4"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "On form submission": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "HTML",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTML": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript1": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript2": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript3": {
+      "main": [
+        [
+          {
+            "node": "Append or update row in sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript4": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "b3fb0588-fa19-44a7-b34b-53a4d6c8c2f0",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "eb45b6b18330b7ec833771190e284bc418d335498c02ead5eefbbee7aca2323c"
+  },
+  "nodeGroups": [],
+  "id": "tlxS872EcOaCLSEB",
+  "tags": []
+}
