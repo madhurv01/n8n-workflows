@@ -1,0 +1,369 @@
+==============================================================================
+  SUPABASE DATABASE MONITORING & DATA QUALITY REPORT
+==============================================================================
+  Run ID            : f5eb57a7-deb0-49f4-b898-eb931e667459
+  Started (UTC)     : 2026-08-10T07:09:16.063Z
+  Finished (UTC)    : 2026-08-10T07:09:16.074Z
+  Duration          : 0.0s
+  Run status        : PARTIAL
+  Projects          : 2  (ok: 1, failed: 1)
+  Tables scanned    : 2
+  Columns scanned   : 7
+  Checks performed  : 34
+  Issues detected   : 21
+  Average health    : 0 / 100
+
+  Severity breakdown:
+    CRITICAL       6
+    HIGH           9
+    MEDIUM         2
+    LOW            4
+    INFO           0
+
+==============================================================================
+  PROJECT HEALTH SCORECARD
+==============================================================================
+  PROJECT             STATUS    SCORE    GRADE  TABLES  ISSUES
+  --------------------------------------------------------------------------
+  prod                SUCCESS   0        F      2       20
+  prod                FAILED    0        F      0       1
+
+  Scoring: 100 - weighted severity penalties (CRITICAL 25, HIGH 10,
+  MEDIUM 4, LOW 1.5), damped above 40 so noise cannot zero the score.
+  Grades: A >=90  B >=75  C >=60  D >=40  F <40
+
+==============================================================================
+  PROJECT: Production  [prod]
+==============================================================================
+  Health score      : 0 / 100  (grade F)
+  Database          : postgres  (PostgreSQL 15.6)
+  Database size     : 512 MB
+  Schemas monitored : public
+  Tables scanned    : 2   Columns: 7
+  Rows accounted    : 1,200
+  Ingested last 24h : 3
+  Checks performed  : 34
+  Collection time   : 812 ms
+  Issues            : CRITICAL=5  HIGH=9  MEDIUM=2  LOW=4  INFO=0
+
+  --------------------------------------------------------------------------
+  CRITICAL SEVERITY  (5)
+  --------------------------------------------------------------------------
+  [001] Table public.ghost_table no longer exists (or is no longer accessible)
+        Check          : table_removed
+        Rule           : default:table_removed
+        Target         : public.ghost_table
+        Current value  : n/a
+        Previous value : n/a
+        Threshold      : n/a
+        Why            : This table was present in a previous run and is missing now.
+        Action         : Confirm the drop was intentional, or check role privileges.
+
+  [002] Row count in public.users dropped 70% (4000 → 1200)
+        Check          : row_count_drop
+        Rule           : default:row_count_drop
+        Target         : public.users
+        Current value  : 1200
+        Previous value : 4000
+        Threshold      : 5
+        Change         : -70%
+        Trend          : DECREASING
+        Why            : 2800 rows disappeared since the previous run at 2026-01-01T00:00:00Z. Row counts are normally monotonic for append-style tables.
+        Action         : Investigate deletes, a failed migration or an accidental truncate.
+
+  [003] public.users.email is 40% NULL (480/1200)
+        Check          : null_percentage
+        Rule           : users.email must be populated
+        Target         : public.users.email
+        Current value  : 40
+        Previous value : n/a
+        Threshold      : 1
+        Why            : NULL density above the configured limit for this column.
+        Action         : Email must always be set.
+        Details        : {"nullable":true,"type":"text"}
+
+  [004] Ingestion into public.users fell 99.63% (800 → 3 rows/24h)
+        Check          : ingestion_drop
+        Rule           : default:ingestion_drop
+        Target         : public.users.created_at
+        Current value  : 3
+        Previous value : 800
+        Threshold      : 40
+        Change         : -99.63%
+        Trend          : DECREASING
+        Why            : 24h write volume dropped versus the previous run (2026-01-01T00:00:00Z).
+        Action         : Inspect producers, rate limits and upstream errors.
+
+  [005] 1 column(s) removed from public.users: legacy_flag
+        Check          : column_removed
+        Rule           : default:column_removed
+        Target         : public.users.legacy_flag
+        Current value  : n/a
+        Previous value : n/a
+        Threshold      : n/a
+        Why            : Present at 2026-01-01T00:00:00Z, gone now. Dropping columns is a breaking change for clients.
+        Action         : Confirm the drop was planned and coordinated with API consumers.
+        Details        : {"removed":["legacy_flag"]}
+
+  --------------------------------------------------------------------------
+  HIGH SEVERITY  (9)
+  --------------------------------------------------------------------------
+  [006] public.users grew 300% on disk (10 MB → 40 MB)
+        Check          : table_size_growth
+        Rule           : default:table_size_growth
+        Target         : public.users
+        Current value  : 41943040
+        Previous value : 10485760
+        Threshold      : 50
+        Change         : +300%
+        Trend          : INCREASING
+        Why            : Physical size increase exceeds the configured growth threshold.
+        Action         : Review retention, large payload columns and index bloat.
+
+  [007] public.users statistics are 586 days old
+        Check          : stale_statistics
+        Rule           : default:stale_statistics
+        Target         : public.users
+        Current value  : 586.3
+        Previous value : n/a
+        Threshold      : 7
+        Why            : Stale planner statistics lead to bad query plans.
+        Action         : Run ANALYZE on this table.
+
+  [008] NULL rate for public.users.email rose 35 pts (5% → 40%)
+        Check          : null_rate_increase
+        Rule           : default:null_rate_increase
+        Target         : public.users.email
+        Current value  : 40
+        Previous value : 5
+        Threshold      : 5
+        Change         : +35%
+        Trend          : INCREASING
+        Why            : A writer likely stopped populating this column after 2026-01-01T00:00:00Z.
+        Action         : Check recent deploys and the producing service.
+
+  [009] public.users.email has 20 duplicate values (2.78% of 720)
+        Check          : unique_like_duplicates
+        Rule           : default:unique_like_duplicates
+        Target         : public.users.email
+        Current value  : 2.78
+        Previous value : n/a
+        Threshold      : n/a
+        Why            : Column name suggests a natural key, but values repeat and no UNIQUE index protects it.
+        Action         : Deduplicate, then CREATE UNIQUE INDEX ON public.users (email);
+        Details        : {"distinct":700,"non_null":720}
+
+  [010] public.users.org_id has 1160 duplicate values (96.67% of 1200)
+        Check          : duplicate_values
+        Rule           : default:duplicate_values
+        Target         : public.users.org_id
+        Current value  : 96.67
+        Previous value : n/a
+        Threshold      : 1
+        Why            : Duplicate ratio above the configured threshold.
+        Action         : Deduplicate, then CREATE UNIQUE INDEX ON public.users (org_id);
+        Details        : {"distinct":40,"non_null":1200}
+
+  [011] 4 rows in public.users.created_at are dated in the future
+        Check          : future_timestamps
+        Rule           : default:future_timestamps
+        Target         : public.users.created_at
+        Current value  : 4
+        Previous value : n/a
+        Threshold      : 1
+        Why            : Timestamps more than 1 day ahead of server time indicate clock skew or unvalidated client input.
+        Action         : Set timestamps server-side (now()) and validate on write.
+
+  [012] public.users is stale — newest row is 300 min old
+        Check          : data_freshness
+        Rule           : default:data_freshness
+        Target         : public.users.created_at
+        Current value  : 300
+        Previous value : n/a
+        Threshold      : 120
+        Trend          : STALE
+        Why            : Latest created_at = 2026-08-10T02:09:16.063Z. Expected fresh data within 120 minutes.
+        Action         : Check the ingestion pipeline, queue workers and cron jobs.
+
+  [013] 7 rows in public.users have updated_at earlier than created_at
+        Check          : timestamp_inconsistency
+        Rule           : default:timestamp_inconsistency
+        Target         : public.users.updated_at
+        Current value  : 7
+        Previous value : n/a
+        Threshold      : 1
+        Why            : Logically impossible ordering — usually a bad trigger or a client-supplied timestamp.
+        Action         : Fix the trigger/application code that maintains updated_at.
+
+  [014] Column type changed in public.users: org_id text → uuid
+        Check          : column_type_changed
+        Rule           : default:column_type_changed
+        Target         : public.users.org_id
+        Current value  : n/a
+        Previous value : n/a
+        Threshold      : n/a
+        Why            : Type changes can silently truncate data and break typed clients.
+        Action         : Verify the migration and regenerate client types.
+        Details        : {"changed":[{"column":"org_id","from":"text","to":"uuid"}]}
+
+  --------------------------------------------------------------------------
+  MEDIUM SEVERITY  (2)
+  --------------------------------------------------------------------------
+  [015] 2 rows in public.users.created_at predate 1980
+        Check          : invalid_timestamps
+        Rule           : default:invalid_timestamps
+        Target         : public.users.created_at
+        Current value  : 2
+        Previous value : n/a
+        Threshold      : 1
+        Why            : Usually an epoch-zero default or a timestamp parsing bug.
+        Action         : Backfill or null out the invalid values and fix the writer.
+
+  [016] Schema changed in public.users — nullability changed: email
+        Check          : schema_change
+        Rule           : default:schema_change
+        Target         : public.users.email
+        Current value  : n/a
+        Previous value : n/a
+        Threshold      : n/a
+        Why            : Fingerprint moved from fp-users to fp-users since 2026-01-01T00:00:00Z.
+        Action         : Verify the change was intentional and update dependent clients.
+        Details        : {"added":[],"nullability_changed":["email"]}
+
+  --------------------------------------------------------------------------
+  LOW SEVERITY  (4)
+  --------------------------------------------------------------------------
+  [017] Table public.orders is empty
+        Check          : empty_table
+        Rule           : default:empty_table
+        Target         : public.orders
+        Current value  : 0
+        Previous value : n/a
+        Threshold      : n/a
+        Why            : No rows found in this table during this run.
+        Action         : Confirm the table is intentionally empty.
+
+  [018] public.orders.user_id looks like a relationship but has no FK constraint
+        Check          : missing_foreign_key
+        Rule           : default:missing_foreign_key
+        Target         : public.orders.user_id
+        Current value  : n/a
+        Previous value : n/a
+        Threshold      : n/a
+        Why            : Naming convention suggests a reference; without a constraint orphans can accumulate silently.
+        Action         : Add a FOREIGN KEY constraint if this column references another table.
+        Details        : {"type":"uuid"}
+
+  [019] Index users_junk_idx (50 MB) on public.users has never been used
+        Check          : unused_index
+        Rule           : default:unused_index
+        Target         : public.users
+        Current value  : 0
+        Previous value : n/a
+        Threshold      : 0
+        Why            : Unused indexes consume storage and slow every INSERT/UPDATE.
+        Action         : Consider DROP INDEX public.users_junk_idx;
+        Details        : {"definition":"CREATE INDEX ...","size_bytes":52428800}
+
+  [020] public.users.org_id looks like a relationship but has no FK constraint
+        Check          : missing_foreign_key
+        Rule           : default:missing_foreign_key
+        Target         : public.users.org_id
+        Current value  : n/a
+        Previous value : n/a
+        Threshold      : n/a
+        Why            : Naming convention suggests a reference; without a constraint orphans can accumulate silently.
+        Action         : Add a FOREIGN KEY constraint if this column references another table.
+        Details        : {"type":"uuid"}
+
+==============================================================================
+  PROJECT: Production  [prod]
+==============================================================================
+  STATUS: FAILED
+  Error : connect ETIMEDOUT 1.2.3.4:443
+
+  This project was skipped. The rest of the run completed normally.
+
+==============================================================================
+  CROSS-PROJECT PRIORITY QUEUE (top 20)
+==============================================================================
+    1. [CRITICAL] prod :: Row count in public.users dropped 70% (4000 → 1200)
+    2. [CRITICAL] prod :: public.users.email is 40% NULL (480/1200)
+    3. [CRITICAL] prod :: Ingestion into public.users fell 99.63% (800 → 3 rows/24h)
+    4. [CRITICAL] prod :: 1 column(s) removed from public.users: legacy_flag
+    5. [CRITICAL] prod :: Table public.ghost_table no longer exists (or is no longer accessible)
+    6. [CRITICAL] prod :: Could not collect metrics from project "prod"
+    7. [HIGH    ] prod :: public.users grew 300% on disk (10 MB → 40 MB)
+    8. [HIGH    ] prod :: public.users statistics are 586 days old
+    9. [HIGH    ] prod :: NULL rate for public.users.email rose 35 pts (5% → 40%)
+   10. [HIGH    ] prod :: public.users.email has 20 duplicate values (2.78% of 720)
+   11. [HIGH    ] prod :: public.users.org_id has 1160 duplicate values (96.67% of 1200)
+   12. [HIGH    ] prod :: 4 rows in public.users.created_at are dated in the future
+   13. [HIGH    ] prod :: public.users is stale — newest row is 300 min old
+   14. [HIGH    ] prod :: 7 rows in public.users have updated_at earlier than created_at
+   15. [HIGH    ] prod :: Column type changed in public.users: org_id text → uuid
+   16. [MEDIUM  ] prod :: 2 rows in public.users.created_at predate 1980
+   17. [MEDIUM  ] prod :: Schema changed in public.users — nullability changed: email
+   18. [LOW     ] prod :: Index users_junk_idx (50 MB) on public.users has never been used
+   19. [LOW     ] prod :: public.users.org_id looks like a relationship but has no FK constraint
+   20. [LOW     ] prod :: Table public.orders is empty
+
+==============================================================================
+  ISSUES BY CHECK TYPE
+==============================================================================
+  missing_foreign_key                  2
+  row_count_drop                       1
+  table_size_growth                    1
+  stale_statistics                     1
+  unused_index                         1
+  null_percentage                      1
+  null_rate_increase                   1
+  unique_like_duplicates               1
+  duplicate_values                     1
+  future_timestamps                    1
+  invalid_timestamps                   1
+  data_freshness                       1
+  ingestion_drop                       1
+  timestamp_inconsistency              1
+  column_removed                       1
+  column_type_changed                  1
+  schema_change                        1
+  empty_table                          1
+  table_removed                        1
+  project_unreachable                  1
+
+==============================================================================
+  NOTABLE TRENDS VS PREVIOUS RUN (|change| >= 10%)
+==============================================================================
+  prod        public.users.created_at                 ingestion     -99.6%
+  prod        public.users                            row_count     -70.0%
+
+==============================================================================
+  RECOMMENDED NEXT ACTIONS
+==============================================================================
+    1. [CRITICAL] (1x) Investigate deletes, a failed migration or an accidental truncate.
+    2. [CRITICAL] (1x) Email must always be set.
+    3. [CRITICAL] (1x) Inspect producers, rate limits and upstream errors.
+    4. [CRITICAL] (1x) Confirm the drop was planned and coordinated with API consumers.
+    5. [CRITICAL] (1x) Confirm the drop was intentional, or check role privileges.
+    6. [CRITICAL] (1x) Verify the project URL, the service_role key in MON_KEYS, and that mon_collect() is installed.
+    7. [HIGH    ] (1x) Review retention, large payload columns and index bloat.
+    8. [HIGH    ] (1x) Run ANALYZE on this table.
+    9. [HIGH    ] (1x) Check recent deploys and the producing service.
+   10. [HIGH    ] (1x) Deduplicate, then CREATE UNIQUE INDEX ON public.users (email);
+   11. [HIGH    ] (1x) Deduplicate, then CREATE UNIQUE INDEX ON public.users (org_id);
+   12. [HIGH    ] (1x) Set timestamps server-side (now()) and validate on write.
+   13. [HIGH    ] (1x) Check the ingestion pipeline, queue workers and cron jobs.
+   14. [HIGH    ] (1x) Fix the trigger/application code that maintains updated_at.
+   15. [HIGH    ] (1x) Verify the migration and regenerate client types.
+   16. [MEDIUM  ] (1x) Backfill or null out the invalid values and fix the writer.
+   17. [MEDIUM  ] (1x) Verify the change was intentional and update dependent clients.
+   18. [LOW     ] (2x) Add a FOREIGN KEY constraint if this column references another table.
+   19. [LOW     ] (1x) Consider DROP INDEX public.users_junk_idx;
+   20. [LOW     ] (1x) Confirm the table is intentionally empty.
+
+==============================================================================
+  END OF REPORT
+  Generated by n8n · Supabase Monitor · run f5eb57a7-deb0-49f4-b898-eb931e667459
+  Full history: monitoring.mon_runs / mon_alerts / mon_metrics
+==============================================================================
