@@ -1,0 +1,595 @@
+{
+  "name": "EV Risk Analyzer",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 6
+            }
+          ]
+        }
+      },
+      "id": "d7a7d6bc-a2bf-416b-817a-a49988347f73",
+      "name": "Every 6 Hours",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://news.google.com/rss/search?q=India+electric+vehicle+scooter+bike+car+fire+accident+crash&hl=en-IN&gl=IN&ceid=IN:en",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text",
+              "outputPropertyName": "body"
+            }
+          }
+        }
+      },
+      "id": "65579f47-e778-4921-abf6-e26dce5d0f6f",
+      "name": "Fetch EV News (Google News RSS)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        208,
+        -256
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "truncated-body",
+              "name": "body",
+              "type": "string",
+              "value": "={{ $json.body.slice(0, 9000) }}"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "id": "e866f6f3-c39d-471e-8c08-b226f1370a22",
+      "name": "Truncate RSS Feed",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        432,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=### LIVE NEWS FEED (Google News RSS - India EV related)\n{{ $json.body }}\n\n### TASK\nExtract the TOP 5 most relevant and recent news items about Indian electric vehicle (EV) incidents - scooter, bike (two-wheeler), or car - covering topics like fires, accidents, crashes, battery explosions, or recalls.\nFor each item, copy the REAL headline title and REAL article URL directly from the RSS feed (the <title> and <link> tags of each <item>). NEVER invent or paraphrase URLs.\nClassify each item into exactly one category: \"scooter\", \"bike\", or \"car\", based on the vehicle type actually mentioned in that specific headline - do NOT force items into categories they don't belong to.\nWrite a concise summary (max 30 words) for each item, based only on the real headline/content.\n\n### CRITICAL RULE - NO FABRICATION\nOnly include items that are genuinely present in the feed above and genuinely relevant to EV scooter/bike/car incidents.\nIf the feed contains fewer than 5 such genuinely relevant items, return ONLY that many items in the \"news\" array (e.g. 2, 3, or 4) - a shorter array is correct and expected.\nNEVER pad the array to reach 5 items. NEVER invent placeholder entries, and NEVER use text like \"No relevant item found\", \"N/A\", \"EMPTY\", or similar filler for title, url, or summary. Every single item in your output must be a real, verifiable article from the feed.",
+        "hasOutputParser": true,
+        "options": {
+          "systemMessage": "You are an EV Safety Intelligence Analyst. You read raw Google News RSS XML and extract only real, verifiable news items - titles and URLs must be copied exactly from the feed, never fabricated. You always respond using the required structured JSON format with a \"news\" array. Do not include any commentary outside the JSON.",
+          "maxIterations": 10
+        }
+      },
+      "id": "bd45238b-67e9-4261-a338-f43cdc38d312",
+      "name": "Classify Top 5 EV News",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        560,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "model": "llama-3.3-70b-versatile",
+        "options": {
+          "temperature": 0.2
+        }
+      },
+      "id": "951a296c-054b-4677-86aa-db6cd882f6e5",
+      "name": "Groq Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        512,
+        272
+      ]
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": "{\"news\":[{\"title\":\"Electric scooter catches fire in Pune residential complex\",\"url\":\"https://example.com/news1\",\"category\":\"scooter\",\"summary\":\"A parked electric scooter caught fire due to a suspected battery malfunction; no injuries reported.\"}]}"
+      },
+      "id": "1e3b6806-5b86-4b6a-bc79-af9b4c3adbc2",
+      "name": "News Output Schema",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        688,
+        272
+      ]
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "output.news",
+        "options": {}
+      },
+      "id": "1fe8c67d-6c54-4744-9a9a-eff60ddb70e4",
+      "name": "Split News Items",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [
+        848,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "leftValue": "={{ $json.url }}",
+              "operator": {
+                "type": "string",
+                "operation": "startsWith"
+              },
+              "rightValue": "https://"
+            },
+            {
+              "leftValue": "={{ $json.title.length }}",
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              },
+              "rightValue": 10
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "d56db8e5-c3d8-4274-baff-6ae3a3093ca0",
+      "name": "Filter Genuine News Items",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2.3,
+      "position": [
+        1072,
+        -16
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "normalized-category",
+              "name": "category",
+              "type": "string",
+              "value": "={{ $json.category.toLowerCase().includes(\"scoot\") ? \"scooter\" : ($json.category.toLowerCase().includes(\"bike\") || $json.category.toLowerCase().includes(\"two\") || $json.category.toLowerCase().includes(\"motor\") ? \"bike\" : \"car\") }}"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "id": "5d821412-2d6e-44ea-a416-2b7e75c776e7",
+      "name": "Normalize Category",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1328,
+        -32
+      ]
+    },
+    {
+      "parameters": {
+        "tableId": "ev_news_alerts",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "title",
+              "fieldValue": "={{ $json.title }}"
+            },
+            {
+              "fieldId": "url",
+              "fieldValue": "={{ $json.url }}"
+            },
+            {
+              "fieldId": "category",
+              "fieldValue": "={{ $json.category }}"
+            },
+            {
+              "fieldId": "summary",
+              "fieldValue": "={{ $json.summary }}"
+            },
+            {
+              "fieldId": "execution_id",
+              "fieldValue": "={{ $execution.id }}"
+            }
+          ]
+        }
+      },
+      "id": "8950742d-a8bf-460d-8688-e1158c98deff",
+      "name": "Insert News Row",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        1328,
+        160
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={{ { \"items\": $('Normalize Category').all().map(i => ({ title: i.json.title, url: i.json.url, category: i.json.category, summary: i.json.summary })) } }}",
+        "options": {}
+      },
+      "id": "8312cd2e-9a41-42d6-8439-29d1f09277c2",
+      "name": "Combine News For Report",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1584,
+        -272
+      ],
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "report-body",
+              "name": "reportBody",
+              "type": "string",
+              "value": "={{ $json.items.map((n, i) => (i + 1) + \". [\" + n.category.toUpperCase() + \"] \" + n.title + \"\\nURL: \" + n.url + \"\\nSummary: \" + n.summary).join(\"\\n\\n\") }}"
+            },
+            {
+              "id": "report-date",
+              "name": "reportDate",
+              "type": "string",
+              "value": "={{ $now.toFormat(\"dd LLL yyyy\") }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "ac27e578-14d7-477c-aac0-41df89e42d75",
+      "name": "Build Report Content",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1584,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "project": {
+          "__rl": true,
+          "mode": "id",
+          "value": "10000",
+          "cachedResultName": "IT support system"
+        },
+        "issueType": {
+          "__rl": true,
+          "mode": "id",
+          "value": "10003",
+          "cachedResultName": "Task"
+        },
+        "summary": "={{ \"EV Safety Alert: Top 5 Trending EV News (\" + $json.reportDate + \")\" }}",
+        "additionalFields": {
+          "description": "={{ $json.reportBody }}",
+          "priority": {
+            "__rl": true,
+            "mode": "id",
+            "value": "2",
+            "cachedResultName": "High"
+          }
+        }
+      },
+      "id": "654943fa-0000-4bc7-a7ac-6b7544d525a4",
+      "name": "Create Jira Ticket",
+      "type": "n8n-nodes-base.jira",
+      "typeVersion": 1,
+      "position": [
+        1808,
+        -224
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "tableId": "ev_news_alerts",
+        "matchType": "allFilters",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "execution_id",
+              "condition": "eq",
+              "keyValue": "={{ $execution.id }}"
+            }
+          ]
+        },
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "jira_ticket_key",
+              "fieldValue": "={{ $json.key }}"
+            }
+          ]
+        }
+      },
+      "id": "979a86b7-4cd5-40c2-aa3a-999839e48463",
+      "name": "Update Rows With Jira Key",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        2080,
+        -400
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "report-body-2",
+              "name": "reportBody",
+              "type": "string",
+              "value": "={{ $('Build Report Content').item.json.reportBody }}"
+            },
+            {
+              "id": "report-date-2",
+              "name": "reportDate",
+              "type": "string",
+              "value": "={{ $('Build Report Content').item.json.reportDate }}"
+            },
+            {
+              "id": "jira-key",
+              "name": "jiraKey",
+              "type": "string",
+              "value": "={{ $('Create Jira Ticket').item.json.key }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "dd39ad98-6356-4836-89ef-ae9865f7780f",
+      "name": "Prepare Email Content",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        2080,
+        144
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "toText",
+        "sourceProperty": "reportBody",
+        "options": {
+          "fileName": "ev_news_summary.txt"
+        }
+      },
+      "id": "884f44e6-ff52-4af4-892c-54c40f920906",
+      "name": "Convert Report To Text File",
+      "type": "n8n-nodes-base.convertToFile",
+      "typeVersion": 1.1,
+      "position": [
+        2304,
+        -208
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "madhu.vmohi@gmail.com",
+        "subject": "={{ 'EV Safety Alert: Top 5 Trending EV News - ' + $('Prepare Email Content').item.json.reportDate + ' (Jira ' + $('Prepare Email Content').item.json.jiraKey + ')' }}",
+        "emailType": "text",
+        "message": "={{ 'Attached is the summary of the top EV-related news items detected in this monitoring cycle (' + $('Prepare Email Content').item.json.reportDate + ').\\n\\nJira ticket created: ' + $('Prepare Email Content').item.json.jiraKey + '\\n\\nFull details, including source URLs, are in the attached .txt file.' }}",
+        "options": {
+          "attachmentsUi": {
+            "attachmentsBinary": [
+              {
+                "property": "data"
+              }
+            ]
+          }
+        }
+      },
+      "id": "3a5681e0-0353-4374-8275-a2004c18c547",
+      "name": "Send IT Summary Email",
+      "notes": "sendTo is intentionally a real address, not a placeholder — this workflow only functions with a real IT recipient email configured here. Do not replace with example.com or similar before importing.",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        2496,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "Every 6 Hours": {
+      "main": [
+        [
+          {
+            "node": "Fetch EV News (Google News RSS)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch EV News (Google News RSS)": {
+      "main": [
+        [
+          {
+            "node": "Truncate RSS Feed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Truncate RSS Feed": {
+      "main": [
+        [
+          {
+            "node": "Classify Top 5 EV News",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Classify Top 5 EV News": {
+      "main": [
+        [
+          {
+            "node": "Split News Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Groq Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Classify Top 5 EV News",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "News Output Schema": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Classify Top 5 EV News",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split News Items": {
+      "main": [
+        [
+          {
+            "node": "Filter Genuine News Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Genuine News Items": {
+      "main": [
+        [
+          {
+            "node": "Normalize Category",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Category": {
+      "main": [
+        [
+          {
+            "node": "Insert News Row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert News Row": {
+      "main": [
+        [
+          {
+            "node": "Combine News For Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Combine News For Report": {
+      "main": [
+        [
+          {
+            "node": "Build Report Content",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Report Content": {
+      "main": [
+        [
+          {
+            "node": "Create Jira Ticket",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Jira Ticket": {
+      "main": [
+        [
+          {
+            "node": "Update Rows With Jira Key",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Prepare Email Content",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Email Content": {
+      "main": [
+        [
+          {
+            "node": "Convert Report To Text File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Convert Report To Text File": {
+      "main": [
+        [
+          {
+            "node": "Send IT Summary Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}
