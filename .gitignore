@@ -6,6 +6,11 @@ ITQueryResolverAgent/it-support-system/.env*.local
 ITQueryResolverAgent/it-support-system/npm-debug.log*
 ITQueryResolverAgent/it-support-system/tsconfig.tsbuildinfo
 
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
 # OS / editor
 .DS_Store
 Thumbs.db
