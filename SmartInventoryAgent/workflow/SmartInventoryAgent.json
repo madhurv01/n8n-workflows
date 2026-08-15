@@ -1,0 +1,254 @@
+{
+  "name": "SmartInventoryAgent",
+  "active": false,
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 */6 * * *"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-1520, 0],
+      "id": "a1b2c3d4-0001-4a1a-9a11-000000000001",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "cfg-location-name",
+              "name": "location_name",
+              "type": "string",
+              "value": "Mumbai Warehouse"
+            },
+            {
+              "id": "cfg-lat",
+              "name": "latitude",
+              "type": "number",
+              "value": 19.076
+            },
+            {
+              "id": "cfg-lon",
+              "name": "longitude",
+              "type": "number",
+              "value": 72.8777
+            },
+            {
+              "id": "cfg-table",
+              "name": "supabase_table",
+              "type": "string",
+              "value": "inventory_items"
+            },
+            {
+              "id": "cfg-low-stock-mult",
+              "name": "low_stock_multiplier",
+              "type": "number",
+              "value": 1.5
+            },
+            {
+              "id": "cfg-alert-email",
+              "name": "alert_email",
+              "type": "string",
+              "value": "madhurvwork@gmail.com"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [-1280, 0],
+      "id": "a1b2c3d4-0002-4a1a-9a11-000000000002",
+      "name": "Agent Config"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.open-meteo.com/v1/forecast?latitude={{ $json.latitude }}&longitude={{ $json.longitude }}&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max,windspeed_10m_max,weathercode&timezone=auto&forecast_days=7",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-1040, 0],
+      "id": "a1b2c3d4-0003-4a1a-9a11-000000000003",
+      "name": "Get Weather Forecast"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Analyze the 7-day Open-Meteo forecast and derive a shipping/inventory risk profile.\nconst weather = $input.first().json;\nconst config = $('Agent Config').first().json;\nconst daily = weather.daily || {};\nconst days = (daily.time || []).map((date, i) => ({\n  date,\n  tempMax: daily.temperature_2m_max?.[i],\n  tempMin: daily.temperature_2m_min?.[i],\n  precipitationSum: daily.precipitation_sum?.[i],\n  precipitationProbability: daily.precipitation_probability_max?.[i],\n  windSpeedMax: daily.windspeed_10m_max?.[i],\n  weatherCode: daily.weathercode?.[i]\n}));\n\n// Weather codes considered severe per WMO code table used by Open-Meteo.\nconst SEVERE_CODES = new Set([65, 67, 75, 82, 86, 95, 96, 99]);\nconst MODERATE_CODES = new Set([55, 63, 73, 81, 85]);\n\nconst reasons = [];\nlet score = 0; // higher = riskier\n\nfor (const d of days) {\n  if (d.precipitationSum >= 40 || d.precipitationProbability >= 80) {\n    score += 3;\n    reasons.push(`Heavy rain expected ${d.date} (${d.precipitationSum}mm, ${d.precipitationProbability}% chance)`);\n  } else if (d.precipitationSum >= 15) {\n    score += 1;\n    reasons.push(`Moderate rain expected ${d.date} (${d.precipitationSum}mm)`);\n  }\n  if (d.windSpeedMax >= 60) {\n    score += 3;\n    reasons.push(`High winds expected ${d.date} (${d.windSpeedMax} km/h)`);\n  } else if (d.windSpeedMax >= 40) {\n    score += 1;\n    reasons.push(`Elevated winds expected ${d.date} (${d.windSpeedMax} km/h)`);\n  }\n  if (d.tempMax >= 42 || d.tempMin <= 0) {\n    score += 2;\n    reasons.push(`Extreme temperature expected ${d.date} (min ${d.tempMin}C / max ${d.tempMax}C)`);\n  }\n  if (SEVERE_CODES.has(d.weatherCode)) {\n    score += 3;\n    reasons.push(`Severe weather (code ${d.weatherCode}) forecast ${d.date}`);\n  } else if (MODERATE_CODES.has(d.weatherCode)) {\n    score += 1;\n  }\n}\n\nlet riskLevel = 'NONE';\nif (score >= 8) riskLevel = 'SEVERE';\nelse if (score >= 5) riskLevel = 'HIGH';\nelse if (score >= 2) riskLevel = 'MODERATE';\nelse if (score >= 1) riskLevel = 'LOW';\n\nconst expediteRecommended = riskLevel === 'HIGH' || riskLevel === 'SEVERE';\n\nreturn [{\n  json: {\n    location_name: config.location_name,\n    latitude: config.latitude,\n    longitude: config.longitude,\n    supabase_table: config.supabase_table,\n    low_stock_multiplier: config.low_stock_multiplier,\n    alert_email: config.alert_email,\n    forecast_days: days,\n    risk_score: score,\n    risk_level: riskLevel,\n    risk_reasons: reasons,\n    expedite_recommended: expediteRecommended,\n    checked_at: new Date().toISOString()\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-800, 0],
+      "id": "a1b2c3d4-0004-4a1a-9a11-000000000004",
+      "name": "Analyze Weather Risk"
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "tableId": "={{ $json.supabase_table }}",
+        "returnAll": true,
+        "filterType": "manual",
+        "matchType": "allFilters",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "location_name",
+              "condition": "eq",
+              "keyValue": "={{ $json.location_name }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [-560, 0],
+      "id": "a1b2c3d4-0005-4a1a-9a11-000000000005",
+      "name": "Get Inventory Items",
+      "credentials": {
+        "supabaseApi": {
+          "id": "O2ElgrZmf5lQlGsX",
+          "name": "Supabase account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Combine each inventory row with the weather risk analysis to decide shipping/reorder actions.\nconst weather = $('Analyze Weather Risk').first().json;\nconst items = $input.all().map(i => i.json);\n\nconst results = items.map(item => {\n  const reorderThreshold = Number(item.reorder_threshold ?? 0);\n  const stockQty = Number(item.stock_quantity ?? 0);\n  const lowStockCutoff = reorderThreshold * Number(weather.low_stock_multiplier ?? 1.5);\n  const isLowStock = stockQty <= lowStockCutoff;\n  const weatherIsRisky = weather.risk_level === 'HIGH' || weather.risk_level === 'SEVERE';\n\n  const expediteShipping = weatherIsRisky && isLowStock;\n  const priorityLevel = expediteShipping\n    ? weather.risk_level\n    : (isLowStock ? 'LOW_STOCK_ONLY' : 'NORMAL');\n\n  const recommendedReorderQty = isLowStock\n    ? Math.max(reorderThreshold * 2 - stockQty, 0)\n    : 0;\n\n  const actionNeeded = expediteShipping || isLowStock;\n\n  return {\n    json: {\n      id: item.id,\n      sku: item.sku,\n      item_name: item.item_name,\n      location_name: item.location_name,\n      stock_quantity: stockQty,\n      reorder_threshold: reorderThreshold,\n      is_low_stock: isLowStock,\n      weather_risk_level: weather.risk_level,\n      weather_risk_reasons: weather.risk_reasons.join('; '),\n      expedite_shipping: expediteShipping,\n      priority_level: priorityLevel,\n      recommended_reorder_qty: recommendedReorderQty,\n      action_needed: actionNeeded,\n      last_weather_check: weather.checked_at\n    }\n  };\n});\n\nreturn results;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-320, 0],
+      "id": "a1b2c3d4-0006-4a1a-9a11-000000000006",
+      "name": "Compute Inventory Actions"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "filter-action-needed",
+              "leftValue": "={{ $json.action_needed }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2.2,
+      "position": [-80, -160],
+      "id": "a1b2c3d4-0007-4a1a-9a11-000000000007",
+      "name": "Needs Update?"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "tableId": "={{ $('Analyze Weather Risk').first().json.supabase_table }}",
+        "filterType": "manual",
+        "matchType": "allFilters",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "id",
+              "condition": "eq",
+              "keyValue": "={{ $json.id }}"
+            }
+          ]
+        },
+        "fieldsUi": {
+          "fieldValues": [
+            { "fieldId": "expedite_shipping", "fieldValue": "={{ $json.expedite_shipping }}" },
+            { "fieldId": "priority_level", "fieldValue": "={{ $json.priority_level }}" },
+            { "fieldId": "weather_risk_level", "fieldValue": "={{ $json.weather_risk_level }}" },
+            { "fieldId": "weather_risk_reasons", "fieldValue": "={{ $json.weather_risk_reasons }}" },
+            { "fieldId": "recommended_reorder_qty", "fieldValue": "={{ $json.recommended_reorder_qty }}" },
+            { "fieldId": "last_weather_check", "fieldValue": "={{ $json.last_weather_check }}" }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [160, -160],
+      "id": "a1b2c3d4-0008-4a1a-9a11-000000000008",
+      "name": "Update Inventory",
+      "credentials": {
+        "supabaseApi": {
+          "id": "O2ElgrZmf5lQlGsX",
+          "name": "Supabase account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build a single plain-text/HTML report summarizing weather risk and inventory actions.\nconst allItems = $('Compute Inventory Actions').all().map(i => i.json);\nconst weather = $('Analyze Weather Risk').first().json;\nconst flagged = allItems.filter(i => i.action_needed);\n\nconst lines = [];\nlines.push(`<h2>Smart Inventory Weather Report — ${weather.location_name}</h2>`);\nlines.push(`<p><b>Checked at:</b> ${weather.checked_at}</p>`);\nlines.push(`<p><b>Weather risk level (next 7 days):</b> ${weather.risk_level} (score ${weather.risk_score})</p>`);\n\nif (weather.risk_reasons.length) {\n  lines.push('<p><b>Reasons:</b></p><ul>' + weather.risk_reasons.map(r => `<li>${r}</li>`).join('') + '</ul>');\n} else {\n  lines.push('<p>No significant weather risks detected.</p>');\n}\n\nif (flagged.length) {\n  lines.push(`<p><b>${flagged.length} item(s) need action:</b></p>`);\n  lines.push('<table border=\"1\" cellpadding=\"6\" cellspacing=\"0\"><tr><th>SKU</th><th>Item</th><th>Stock</th><th>Priority</th><th>Expedite Shipping</th><th>Recommended Reorder Qty</th></tr>');\n  for (const item of flagged) {\n    lines.push(`<tr><td>${item.sku}</td><td>${item.item_name}</td><td>${item.stock_quantity}</td><td>${item.priority_level}</td><td>${item.expedite_shipping ? 'YES' : 'no'}</td><td>${item.recommended_reorder_qty}</td></tr>`);\n  }\n  lines.push('</table>');\n} else {\n  lines.push('<p>No inventory items currently need reorder or expedited shipping.</p>');\n}\n\nreturn [{\n  json: {\n    alert_email: weather.alert_email,\n    location_name: weather.location_name,\n    subject: `Smart Inventory Report — ${weather.location_name} — ${weather.risk_level} risk (${flagged.length} item(s) flagged)`,\n    report_html: lines.join('\\n'),\n    flagged_count: flagged.length\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-80, 160],
+      "id": "a1b2c3d4-0009-4a1a-9a11-000000000009",
+      "name": "Build Report",
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.alert_email }}",
+        "subject": "={{ $json.subject }}",
+        "message": "={{ $json.report_html }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [160, 160],
+      "id": "a1b2c3d4-0010-4a1a-9a11-00000000000a",
+      "name": "Send Report Email",
+      "webhookId": "b2c3d4e5-0001-4a1a-9a11-00000000000b",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "NihpP9nK1t6p6IT7",
+          "name": "Gmail account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": { "main": [[{ "node": "Agent Config", "type": "main", "index": 0 }]] },
+    "Agent Config": { "main": [[{ "node": "Get Weather Forecast", "type": "main", "index": 0 }]] },
+    "Get Weather Forecast": { "main": [[{ "node": "Analyze Weather Risk", "type": "main", "index": 0 }]] },
+    "Analyze Weather Risk": { "main": [[{ "node": "Get Inventory Items", "type": "main", "index": 0 }]] },
+    "Get Inventory Items": { "main": [[{ "node": "Compute Inventory Actions", "type": "main", "index": 0 }]] },
+    "Compute Inventory Actions": {
+      "main": [
+        [
+          { "node": "Needs Update?", "type": "main", "index": 0 },
+          { "node": "Build Report", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Needs Update?": { "main": [[{ "node": "Update Inventory", "type": "main", "index": 0 }]] },
+    "Build Report": { "main": [[{ "node": "Send Report Email", "type": "main", "index": 0 }]] }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": true
+  }
+}
