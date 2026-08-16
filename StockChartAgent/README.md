@@ -1,3 +1,11 @@
+
+<img
+    src="StockChartAgent.png"
+    alt="Build Your Own Agent Now - n8n AI Agents"
+    width="100%"
+  />
+
+
 # StockChartAgent
 
 An n8n workflow that scrapes **live data from TradingView** for a stock ticker you type into a form, computes real

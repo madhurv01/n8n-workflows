@@ -1,0 +1,229 @@
+{
+  "name": "StockChartAgent",
+  "nodes": [
+    {
+      "id": "2d53c097-58e3-402e-ba85-a51397bdac93",
+      "name": "Enter Stock Symbol",
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.6,
+      "position": [0, 112],
+      "webhookId": "a1c8d5cb-3c28-4bfd-a436-6ec4e5e68fb0",
+      "parameters": {
+        "formTitle": "Stock Chart Analysis Agent",
+        "formDescription": "Enter a stock ticker symbol to generate a detailed, up-to-date technical and analytics report emailed to you as a .txt file.",
+        "formFields": {
+          "values": [
+            { "fieldLabel": "Stock Ticker Symbol", "fieldName": "stockSymbol", "fieldType": "text", "placeholder": "e.g. AAPL, MSFT, TSLA, RELIANCE", "requiredField": true }
+          ]
+        },
+        "responseMode": "lastNode",
+        "options": { "appendAttribution": false, "buttonLabel": "Analyze Stock" }
+      }
+    },
+    {
+      "id": "c480b54c-5279-48b1-88d6-70b9b059df11",
+      "name": "Resolve TradingView Symbol",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [224, 112],
+      "parameters": {
+        "method": "GET",
+        "url": "https://symbol-search.tradingview.com/symbol_search/",
+        "authentication": "none",
+        "sendQuery": true,
+        "specifyQuery": "keypair",
+        "queryParameters": {
+          "parameters": [
+            { "name": "text", "value": "={{ $json.stockSymbol.trim() }}" },
+            { "name": "type", "value": "stock" },
+            { "name": "domain", "value": "production" },
+            { "name": "lang", "value": "en" }
+          ]
+        },
+        "sendHeaders": true,
+        "specifyHeaders": "keypair",
+        "headerParameters": {
+          "parameters": [
+            { "name": "User-Agent", "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" },
+            { "name": "Referer", "value": "https://www.tradingview.com/" },
+            { "name": "Origin", "value": "https://www.tradingview.com" },
+            { "name": "Accept", "value": "application/json" }
+          ]
+        },
+        "options": { "response": { "response": { "neverError": true, "responseFormat": "json" } } }
+      }
+    },
+    {
+      "id": "a847e6f5-21fa-470a-a7c6-8b4298d19376",
+      "name": "Pick Best Match",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [448, 112],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const requestedSymbol = ($('Enter Stock Symbol').item.json.stockSymbol || '').trim().toUpperCase();\n\nlet list = $input.all().map(item => item.json);\nif (list.length === 1 && Array.isArray(list[0].symbols)) {\n  list = list[0].symbols;\n}\nif (!Array.isArray(list)) list = [];\n\nconst stripTags = (s) => (s || '').toString().replace(/<[^>]*>/g, '');\n\nconst stockTypes = ['stock', 'dr', 'common stock', 'fund'];\nconst stockMatches = list.filter(i => stockTypes.includes((i.type || '').toLowerCase()));\nconst candidates = stockMatches.length ? stockMatches : list;\nconst best = candidates[0];\n\nif (!best) {\n  return [{ json: { error: true, requestedSymbol, errorMessage: `No TradingView symbol found for \"${requestedSymbol}\". Try a more specific or well-known ticker (e.g. AAPL, MSFT, RELIANCE).` } }];\n}\n\nconst exchange = (stripTags(best.exchange) || 'NASDAQ').toUpperCase();\nconst symbol = (stripTags(best.symbol) || requestedSymbol).toUpperCase();\nconst tvSymbol = exchange + ':' + symbol;\n\nconst regionMap = {\n  NASDAQ: 'america', NYSE: 'america', AMEX: 'america', OTC: 'america',\n  NSE: 'india', BSE: 'india',\n  LSE: 'uk',\n  TSX: 'canada', TSXV: 'canada',\n  ASX: 'australia',\n  XETR: 'germany', FWB: 'germany',\n};\nconst region = regionMap[exchange] || 'america';\n\nreturn [{ json: { tvSymbol, exchange, symbol, region, description: stripTags(best.description), requestedSymbol } }];"
+      }
+    },
+    {
+      "id": "2f591bbb-3b58-4a8b-aeb1-52a77773b807",
+      "name": "Fetch TradingView Market Data",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [672, 112],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://scanner.tradingview.com/{{ $json.region }}/scan",
+        "authentication": "none",
+        "sendHeaders": true,
+        "specifyHeaders": "keypair",
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "User-Agent", "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" },
+            { "name": "Referer", "value": "https://www.tradingview.com/" },
+            { "name": "Origin", "value": "https://www.tradingview.com" }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"symbols\": { \"tickers\": [$json.tvSymbol], \"query\": { \"types\": [] } }, \"columns\": [\"description\",\"close\",\"change\",\"change_abs\",\"high\",\"low\",\"volume\",\"average_volume_10d_calc\",\"High.1M\",\"Low.1M\",\"High.3M\",\"Low.3M\",\"High.6M\",\"Low.6M\",\"price_52_week_high\",\"price_52_week_low\",\"Perf.W\",\"Perf.1M\",\"Perf.3M\",\"Perf.6M\",\"Perf.Y\",\"Perf.YTD\",\"SMA20\",\"SMA50\",\"SMA200\",\"RSI\",\"Volatility.D\",\"market_cap_basic\",\"sector\",\"industry\",\"currency\"] } }}",
+        "options": { "response": { "response": { "neverError": true, "responseFormat": "json" } } }
+      }
+    },
+    {
+      "id": "49b7f8d1-7da3-4925-8cea-cca4abcc0541",
+      "name": "Compute Stock Analytics",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [896, 112],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const upstream = $('Pick Best Match').item.json;\n\nif (upstream.error) {\n  return [{ json: { symbol: upstream.requestedSymbol, error: true, errorMessage: upstream.errorMessage } }];\n}\n\nconst body = $json;\nconst row = body && body.data && body.data[0];\n\nif (!row || !row.d) {\n  return [{ json: { symbol: upstream.tvSymbol, error: true, errorMessage: 'TradingView returned no live market data for ' + upstream.tvSymbol + '. The symbol/exchange combination may be unsupported on this data feed.' } }];\n}\n\nconst d = row.d;\nconst col = (i) => (d[i] === undefined ? null : d[i]);\nconst round2 = (v) => (v == null ? null : +Number(v).toFixed(2));\n\nconst description = col(0);\nconst close = col(1);\nconst changePercent = col(2);\nconst changeAbs = col(3);\nconst high = col(4);\nconst low = col(5);\nconst volume = col(6);\nconst avgVolume10d = col(7);\nconst high1M = col(8);\nconst low1M = col(9);\nconst high3M = col(10);\nconst low3M = col(11);\nconst high6M = col(12);\nconst low6M = col(13);\nconst fiftyTwoWeekHigh = col(14);\nconst fiftyTwoWeekLow = col(15);\nconst perfW = col(16);\nconst perf1M = col(17);\nconst perf3M = col(18);\nconst perf6M = col(19);\nconst perfY = col(20);\nconst perfYTD = col(21);\nconst sma20 = col(22);\nconst sma50 = col(23);\nconst sma200 = col(24);\nconst rsi = col(25);\nconst volatilityDaily = col(26);\nconst marketCap = col(27);\nconst sector = col(28);\nconst industry = col(29);\nconst currency = col(30);\n\nconst analytics = {\n  symbol: upstream.symbol,\n  tvSymbol: upstream.tvSymbol,\n  companyName: description || upstream.symbol,\n  exchange: upstream.exchange,\n  sector: sector || null,\n  industry: industry || null,\n  currency: currency || null,\n  marketCap: marketCap || null,\n  generatedAt: new Date().toISOString(),\n  latestPrice: round2(close),\n  todayChangePercent: round2(changePercent),\n  todayChangeAbsolute: round2(changeAbs),\n  todayHigh: round2(high),\n  todayLow: round2(low),\n  todayVolume: volume,\n  averageVolume10Day: avgVolume10d ? Math.round(avgVolume10d) : null,\n  fiftyTwoWeekHigh: round2(fiftyTwoWeekHigh),\n  fiftyTwoWeekLow: round2(fiftyTwoWeekLow),\n  sma20: round2(sma20),\n  sma50: round2(sma50),\n  sma200: round2(sma200),\n  rsi14: round2(rsi),\n  volatilityDailyPercent: round2(volatilityDaily),\n  last1Week: { percentChange: round2(perfW) },\n  last30Days: { percentChange: round2(perf1M), periodHigh: round2(high1M), periodLow: round2(low1M) },\n  last3Months: { percentChange: round2(perf3M), periodHigh: round2(high3M), periodLow: round2(low3M) },\n  last6Months: { percentChange: round2(perf6M), periodHigh: round2(high6M), periodLow: round2(low6M) },\n  last1Year: { percentChange: round2(perfY) },\n  yearToDate: { percentChange: round2(perfYTD) },\n  dataSource: 'TradingView live market data (scanner.tradingview.com)',\n};\n\nreturn [{ json: analytics }];"
+      }
+    },
+    {
+      "id": "bb06ecdb-7c9a-454b-8a19-6745be020984",
+      "name": "Groq Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [1200, 336],
+      "parameters": {
+        "model": "llama-3.3-70b-versatile",
+        "options": { "maxTokensToSample": 4096, "temperature": 0.4 }
+      },
+      "credentials": { "groqApi": { "id": "Kybxjn07EJr7N4O0", "name": "Groq account" } }
+    },
+    {
+      "id": "00085a69-15d0-48fa-85a0-dd47d38eee50",
+      "name": "Generate Stock Analysis Report",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [1120, 112],
+      "parameters": {
+        "promptType": "define",
+        "text": "=Write a detailed, up-to-date stock analysis report using ONLY the JSON analytics data below (sourced live from TradingView). Do not invent numbers not present in the data.\n\nAnalytics JSON:\n{{ JSON.stringify($json, null, 2) }}",
+        "hasOutputParser": false,
+        "options": {
+          "systemMessage": "You are a professional equity research analyst. You write clear, well-structured plain-text stock analysis reports suitable for saving as a .txt file (no markdown symbols like # or **, use plain headers, dashes and line breaks instead). All data in the JSON comes from live TradingView market data (scanner.tradingview.com) - treat it as current, real market figures, not placeholders.\n\nIf the input JSON has \"error\": true, output only a short plain-text explanation of the error and stop.\n\nOtherwise structure the report with these sections, each with a clear ALL-CAPS header line followed by a line of dashes:\n1. REPORT HEADER - company name, symbol (tvSymbol), exchange, sector/industry, currency, market cap, report generated timestamp, and a note that data is sourced live from TradingView\n2. TODAY'S SNAPSHOT - latest price, today change (percent and absolute), today high/low, today volume vs the 10-day average volume, and whether the stock is up or down today\n3. KEY TECHNICAL PARAMETERS - 20/50/200-day simple moving averages and what the price position relative to them implies (uptrend/downtrend/neutral), 14-period RSI and whether it signals overbought/oversold/neutral, 52-week high/low and where the current price sits in that range, daily volatility and what it implies about risk\n4. PERIOD PERFORMANCE - a clear breakdown of performance over Last 1 Week, Last 30 Days (with period high/low), Last 3 Months (with period high/low), Last 6 Months (with period high/low), Last 1 Year, and Year-to-Date\n5. DETAILED NARRATIVE ANALYSIS - a multi-paragraph written analysis synthesizing all the above: trend direction, momentum, RSI-based overbought/oversold read, volatility/risk profile, support/resistance approximated from period highs/lows, and volume behavior\n6. SUMMARY & OUTLOOK - a concise closing summary of the overall technical picture (not investment advice; include a short disclaimer that this is for informational purposes only and not financial advice)\n\nBe specific and quantitative, referencing the actual numbers from the JSON throughout. Keep the tone professional and objective.",
+          "maxIterations": 5
+        }
+      }
+    },
+    {
+      "id": "4a8a1d74-1c6e-4680-93a7-aeb8cf210394",
+      "name": "Convert Report to TXT",
+      "type": "n8n-nodes-base.convertToFile",
+      "typeVersion": 1.1,
+      "position": [1392, -16],
+      "parameters": {
+        "operation": "toText",
+        "sourceProperty": "output",
+        "binaryPropertyName": "data",
+        "options": {
+          "fileName": "={{ $('Compute Stock Analytics').item.json.symbol }}_analysis_{{ $now.toFormat('yyyy-MM-dd') }}.txt"
+        }
+      }
+    },
+    {
+      "id": "ad69ba13-4e5a-45f9-8f6d-3560d41e596f",
+      "name": "Save Report to Disk",
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1.1,
+      "position": [1568, 112],
+      "parameters": {
+        "operation": "write",
+        "fileName": "=C:/Users/mohit/.n8n-files/StockChartAgent/{{ $('Compute Stock Analytics').item.json.symbol }}_analysis_{{ $now.toFormat('yyyy-MM-dd') }}.txt",
+        "dataPropertyName": "data"
+      }
+    },
+    {
+      "id": "ff99a6a6-bf41-44bf-9496-e094e53c4982",
+      "name": "Send Report via Gmail",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [1792, 112],
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "sendTo": "madhurvwork@gmail.com",
+        "subject": "=Stock Analysis Report - {{ $('Compute Stock Analytics').item.json.symbol }} - {{ $now.toFormat('yyyy-MM-dd') }}",
+        "emailType": "text",
+        "message": "=Attached is the detailed stock analysis report for {{ $('Compute Stock Analytics').item.json.symbol }}, generated on {{ $now.toFormat('yyyy-MM-dd HH:mm') }} using live TradingView market data.\n\nThis report is for informational purposes only and is not financial advice.",
+        "options": {
+          "appendAttribution": false,
+          "attachmentsUi": { "attachmentsBinary": [{ "property": "data" }] }
+        }
+      },
+      "credentials": { "gmailOAuth2": { "id": "NihpP9nK1t6p6IT7", "name": "Gmail account" } }
+    },
+    {
+      "id": "6eb181ec-1ac5-4bfb-8851-1f6d5b16e764",
+      "name": "Deliver Report",
+      "type": "n8n-nodes-base.form",
+      "typeVersion": 2.5,
+      "position": [2016, 112],
+      "webhookId": "bb1d7184-1fba-48e2-8996-abb7889d891c",
+      "parameters": {
+        "operation": "completion",
+        "respondWith": "text",
+        "completionTitle": "Report Emailed",
+        "completionMessage": "=Your detailed stock analysis report for {{ $('Compute Stock Analytics').item.json.symbol }} was generated from live TradingView data and emailed to madhurvwork@gmail.com."
+      }
+    },
+    {
+      "id": "5b06815a-9924-442d-854d-2b187044ddbb",
+      "name": "Sticky Note f4599836",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [592, 336],
+      "parameters": {
+        "content": "## StockChartAgent\nEnter a stock ticker in the form.\n\nFlow: Form Input -> Resolve TradingView Symbol -> Fetch Live TradingView Market Data (scanner.tradingview.com) -> Compute Analytics (today, 1w, 30d, 3m, 6m, 1y, YTD) -> AI Report Writer (Groq) -> Convert to .txt -> Save to Disk -> Email via Gmail -> Confirmation page.\n\nAll chart/performance data is pulled live from TradingView. The .txt report is saved on the n8n host under C:/Users/mohit/.n8n-files/StockChartAgent/ and emailed to madhurvwork@gmail.com as an attachment.",
+        "color": 4,
+        "width": 400,
+        "height": 260
+      }
+    }
+  ],
+  "connections": {
+    "Enter Stock Symbol": { "main": [[{ "node": "Resolve TradingView Symbol", "type": "main", "index": 0 }]] },
+    "Resolve TradingView Symbol": { "main": [[{ "node": "Pick Best Match", "type": "main", "index": 0 }]] },
+    "Pick Best Match": { "main": [[{ "node": "Fetch TradingView Market Data", "type": "main", "index": 0 }]] },
+    "Fetch TradingView Market Data": { "main": [[{ "node": "Compute Stock Analytics", "type": "main", "index": 0 }]] },
+    "Compute Stock Analytics": { "main": [[{ "node": "Generate Stock Analysis Report", "type": "main", "index": 0 }]] },
+    "Generate Stock Analysis Report": { "main": [[{ "node": "Convert Report to TXT", "type": "main", "index": 0 }]] },
+    "Groq Model": { "ai_languageModel": [[{ "node": "Generate Stock Analysis Report", "type": "ai_languageModel", "index": 0 }]] },
+    "Convert Report to TXT": { "main": [[{ "node": "Save Report to Disk", "type": "main", "index": 0 }]] },
+    "Save Report to Disk": { "main": [[{ "node": "Send Report via Gmail", "type": "main", "index": 0 }]] },
+    "Send Report via Gmail": { "main": [[{ "node": "Deliver Report", "type": "main", "index": 0 }]] }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "n8nId": "4lrl9R7xJCfR7MPU",
+    "instanceUrl": "https://hug-multitask-granny.ngrok-free.dev"
+  }
+}
