@@ -94,6 +94,38 @@ A live end-to-end test run for `AAPL` was executed directly against the n8n API 
 - The `.txt` file was saved to disk.
 - The email was actually sent via Gmail (message landed in Sent/Inbox).
 
+## Sample report output
+
+The `.txt` file follows the six-section structure enforced by the AI agent's system prompt. An excerpt from a real
+`AAPL` run:
+
+```
+REPORT HEADER
+------------------------------------------------
+Apple Inc., symbol NASDAQ:AAPL, listed on the NASDAQ exchange, Electronic Technology sector...
+
+TODAY'S SNAPSHOT
+------------------------------------------------
+Latest price: $305.93. Today's change: +0.22% (+$0.67)...
+
+KEY TECHNICAL PARAMETERS
+------------------------------------------------
+SMA20: $318.43, SMA50: $309.19, SMA200: $280.48 — price below the 20-day average suggests...
+RSI(14): 43.67 — neutral, neither overbought nor oversold...
+
+PERIOD PERFORMANCE
+------------------------------------------------
+Last 30 Days: -3.68% | Last 3 Months: +2.70% | Last 6 Months: +16.76% | Last 1 Year: +30.71%...
+
+DETAILED NARRATIVE ANALYSIS
+------------------------------------------------
+...
+
+SUMMARY & OUTLOOK
+------------------------------------------------
+... This report is for informational purposes only and is not financial advice.
+```
+
 ## Project files
 
 | File | Purpose |
