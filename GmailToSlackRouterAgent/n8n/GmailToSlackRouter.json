@@ -1,0 +1,218 @@
+{
+  "name": "Route and Categorize Gmail Emails to Slack (Llama 3 via OpenRouter)",
+  "nodes": [
+    {
+      "id": "gmail-trigger-1",
+      "name": "Gmail Trigger",
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 300],
+      "parameters": {
+        "pollTimes": { "item": [{ "mode": "everyMinute" }] },
+        "simple": true,
+        "filters": {}
+      },
+      "credentials": {
+        "gmailOAuth2": { "name": "Gmail account" }
+      }
+    },
+    {
+      "id": "classify-email-1",
+      "name": "Classify Email with Llama 3",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [240, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "sendHeaders": true,
+        "specifyHeaders": "keypair",
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "HTTP-Referer", "value": "https://n8n.local/gmail-to-slack-router" },
+            { "name": "X-Title", "value": "Gmail to Slack Router" }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"model\": \"meta-llama/llama-3-8b-instruct\", \"temperature\": 0.2, \"messages\": [ { \"role\": \"system\", \"content\": \"You are an email triage assistant. Classify the email into exactly one category: Urgent, Sales, Support, or Other. Respond with ONLY compact JSON in this exact shape, no markdown, no extra text: {\\\"category\\\":\\\"Urgent|Sales|Support|Other\\\",\\\"priority\\\":\\\"High|Medium|Low\\\",\\\"summary\\\":\\\"one sentence summary of the email\\\"}\" }, { \"role\": \"user\", \"content\": \"Subject: \" + $json.subject + \"\\nFrom: \" + $json.from + \"\\nBody: \" + ($json.snippet || $json.text || '') } ] } }}",
+        "options": {
+          "response": { "response": { "neverError": true, "responseFormat": "json" } }
+        }
+      },
+      "credentials": {
+        "httpBearerAuth": { "name": "OpenRouter account" }
+      }
+    },
+    {
+      "id": "parse-classification-1",
+      "name": "Parse Classification",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [480, 300],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const emailJson = $('Gmail Trigger').item.json;\nconst response = $json;\n\nconst rawContent = response?.choices?.[0]?.message?.content || '';\n\nlet parsed;\ntry {\n  parsed = JSON.parse(rawContent);\n} catch (e) {\n  const match = rawContent.match(/\\{[\\s\\S]*\\}/);\n  if (match) {\n    try { parsed = JSON.parse(match[0]); } catch (e2) { parsed = null; }\n  }\n}\n\nif (!parsed || typeof parsed !== 'object') {\n  parsed = { category: 'Other', priority: 'Low', summary: (rawContent || 'Could not classify this email.').slice(0, 200) };\n}\n\nconst allowedCategories = ['Urgent', 'Sales', 'Support', 'Other'];\nif (!allowedCategories.includes(parsed.category)) parsed.category = 'Other';\n\nconst allowedPriorities = ['High', 'Medium', 'Low'];\nif (!allowedPriorities.includes(parsed.priority)) parsed.priority = 'Medium';\n\nreturn [{\n  json: {\n    category: parsed.category,\n    priority: parsed.priority,\n    summary: parsed.summary || '',\n    subject: emailJson.subject,\n    from: emailJson.from,\n    emailId: emailJson.id,\n    threadId: emailJson.threadId,\n    snippet: emailJson.snippet,\n  },\n}];"
+      }
+    },
+    {
+      "id": "route-category-1",
+      "name": "Route by Category",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [720, 300],
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "outputKey": "Urgent",
+              "conditions": {
+                "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+                "conditions": [
+                  { "leftValue": "={{ $json.category }}", "operator": { "type": "string", "operation": "equals" }, "rightValue": "Urgent" }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "outputKey": "Sales",
+              "conditions": {
+                "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+                "conditions": [
+                  { "leftValue": "={{ $json.category }}", "operator": { "type": "string", "operation": "equals" }, "rightValue": "Sales" }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "outputKey": "Support",
+              "conditions": {
+                "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+                "conditions": [
+                  { "leftValue": "={{ $json.category }}", "operator": { "type": "string", "operation": "equals" }, "rightValue": "Support" }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "options": { "fallbackOutput": "extra", "renameFallbackOutput": "Other" }
+      }
+    },
+    {
+      "id": "notify-urgent-1",
+      "name": "Notify #urgent-emails",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.3,
+      "position": [980, 60],
+      "parameters": {
+        "resource": "message",
+        "operation": "post",
+        "select": "channel",
+        "channelId": { "__rl": true, "mode": "name", "value": "#urgent-emails" },
+        "text": "=🚨 *Urgent* ({{ $json.priority }} priority)\n*From:* {{ $json.from }}\n*Subject:* {{ $json.subject }}\n*Summary:* {{ $json.summary }}",
+        "otherOptions": {}
+      },
+      "credentials": {
+        "slackApi": { "name": "Slack account" }
+      }
+    },
+    {
+      "id": "notify-sales-1",
+      "name": "Notify #sales-leads",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.3,
+      "position": [980, 220],
+      "parameters": {
+        "resource": "message",
+        "operation": "post",
+        "select": "channel",
+        "channelId": { "__rl": true, "mode": "name", "value": "#sales-leads" },
+        "text": "=💰 *Sales* ({{ $json.priority }} priority)\n*From:* {{ $json.from }}\n*Subject:* {{ $json.subject }}\n*Summary:* {{ $json.summary }}",
+        "otherOptions": {}
+      },
+      "credentials": {
+        "slackApi": { "name": "Slack account" }
+      }
+    },
+    {
+      "id": "notify-support-1",
+      "name": "Notify #support-tickets",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.3,
+      "position": [980, 380],
+      "parameters": {
+        "resource": "message",
+        "operation": "post",
+        "select": "channel",
+        "channelId": { "__rl": true, "mode": "name", "value": "#support-tickets" },
+        "text": "=🛠️ *Support* ({{ $json.priority }} priority)\n*From:* {{ $json.from }}\n*Subject:* {{ $json.subject }}\n*Summary:* {{ $json.summary }}",
+        "otherOptions": {}
+      },
+      "credentials": {
+        "slackApi": { "name": "Slack account" }
+      }
+    },
+    {
+      "id": "notify-other-1",
+      "name": "Notify #general-inbox",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.3,
+      "position": [980, 540],
+      "parameters": {
+        "resource": "message",
+        "operation": "post",
+        "select": "channel",
+        "channelId": { "__rl": true, "mode": "name", "value": "#general-inbox" },
+        "text": "=📥 *Other* ({{ $json.priority }} priority)\n*From:* {{ $json.from }}\n*Subject:* {{ $json.subject }}\n*Summary:* {{ $json.summary }}",
+        "otherOptions": {}
+      },
+      "credentials": {
+        "slackApi": { "name": "Slack account" }
+      }
+    },
+    {
+      "id": "sticky-1",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [0, -140],
+      "parameters": {
+        "content": "## Route and Categorize Gmail Emails to Slack\nGmail + Llama 3 (via OpenRouter) + Slack\n\nNew email arrives -> Llama 3 classifies it as Urgent / Sales / Support / Other and writes a one-line summary -> routed to the matching Slack channel.\n\nBefore running: add the 'OpenRouter account' (Bearer token) and 'Slack account' credentials, and create/rename the 4 target Slack channels.",
+        "color": 4,
+        "width": 420,
+        "height": 220
+      }
+    }
+  ],
+  "connections": {
+    "Gmail Trigger": {
+      "main": [[{ "node": "Classify Email with Llama 3", "type": "main", "index": 0 }]]
+    },
+    "Classify Email with Llama 3": {
+      "main": [[{ "node": "Parse Classification", "type": "main", "index": 0 }]]
+    },
+    "Parse Classification": {
+      "main": [[{ "node": "Route by Category", "type": "main", "index": 0 }]]
+    },
+    "Route by Category": {
+      "main": [
+        [{ "node": "Notify #urgent-emails", "type": "main", "index": 0 }],
+        [{ "node": "Notify #sales-leads", "type": "main", "index": 0 }],
+        [{ "node": "Notify #support-tickets", "type": "main", "index": 0 }],
+        [{ "node": "Notify #general-inbox", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "note": "Built offline without live n8n API validation. Import via Workflows -> Import from File, then verify credentials, Slack channel names, and the OpenRouter model id before activating."
+  }
+}
